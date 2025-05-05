@@ -21,6 +21,8 @@ from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser
 from pytorch_msssim import ms_ssim
+
+
 def readImages(renders_dir, gt_dir):
     renders = []
     gts = []
@@ -28,10 +30,11 @@ def readImages(renders_dir, gt_dir):
     for fname in os.listdir(renders_dir):
         render = Image.open(renders_dir / fname)
         gt = Image.open(gt_dir / fname)
-        renders.append(tf.to_tensor(render).unsqueeze(0)[:, :3, :, :].cuda())
-        gts.append(tf.to_tensor(gt).unsqueeze(0)[:, :3, :, :].cuda())
+        renders.append(tf.to_tensor(render).unsqueeze(0)[:, :3, :, :].cpu())
+        gts.append(tf.to_tensor(gt).unsqueeze(0)[:, :3, :, :].cpu())
         image_names.append(fname)
     return renders, gts, image_names
+
 
 def evaluate(model_paths):
 
@@ -71,12 +74,16 @@ def evaluate(model_paths):
                 ms_ssims = []
                 Dssims = []
                 for idx in tqdm(range(len(renders)), desc="Metric evaluation progress"):
-                    ssims.append(ssim(renders[idx], gts[idx]))
-                    psnrs.append(psnr(renders[idx], gts[idx]))
-                    lpipss.append(lpips(renders[idx], gts[idx], net_type='vgg'))
-                    ms_ssims.append(ms_ssim(renders[idx], gts[idx],data_range=1, size_average=True ))
-                    lpipsa.append(lpips(renders[idx], gts[idx], net_type='alex'))
+                    gt_gpu = gts[idx].to(device="cuda")
+                    render_gpu = renders[idx].to(device="cuda")
+                    ssims.append(ssim(render_gpu, gt_gpu).cpu())
+                    psnrs.append(psnr(render_gpu, gt_gpu).cpu())
+                    lpipss.append(lpips(render_gpu, gt_gpu, net_type='vgg').cpu())
+                    ms_ssims.append(ms_ssim(render_gpu, gt_gpu, data_range=1, size_average=True ).cpu())
+                    lpipsa.append(lpips(render_gpu, gt_gpu, net_type='alex').cpu())
                     Dssims.append((1-ms_ssims[-1])/2)
+                    gt_gpu = gt_gpu.cpu()
+                    render_gpu = gt_gpu.cpu()
 
                 print("Scene: ", scene_dir,  "SSIM : {:>12.7f}".format(torch.tensor(ssims).mean(), ".5"))
                 print("Scene: ", scene_dir,  "PSNR : {:>12.7f}".format(torch.tensor(psnrs).mean(), ".5"))
@@ -113,9 +120,6 @@ def evaluate(model_paths):
             raise e
 
 if __name__ == "__main__":
-    device = torch.device("cuda:0")
-    torch.cuda.set_device(device)
-
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
     parser.add_argument('--model_paths', '-m', required=True, nargs="+", type=str, default=[])
