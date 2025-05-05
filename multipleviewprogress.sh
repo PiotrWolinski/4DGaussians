@@ -1,7 +1,9 @@
 workdir=$1
+
 python scripts/extractimages.py multipleview/$workdir
-colmap feature_extractor --database_path ./colmap_tmp/database.db --image_path ./colmap_tmp/images  --SiftExtraction.max_image_size 4096 --SiftExtraction.max_num_features 16384 --SiftExtraction.estimate_affine_shape 1 --SiftExtraction.domain_size_pooling 1
+colmap feature_extractor --database_path ./colmap_tmp/database.db --image_path ./colmap_tmp/images --ImageReader.single_camera_per_folder 1 --SiftExtraction.max_image_size 4096 --SiftExtraction.max_num_features 16384 --SiftExtraction.estimate_affine_shape 1 --SiftExtraction.domain_size_pooling 1
 colmap exhaustive_matcher --database_path ./colmap_tmp/database.db
+
 mkdir ./colmap_tmp/sparse
 colmap mapper --database_path ./colmap_tmp/database.db --image_path ./colmap_tmp/images --output_path ./colmap_tmp/sparse
 mkdir ./data/multipleview/$workdir/sparse_
