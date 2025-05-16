@@ -28,34 +28,43 @@ class multipleview_dataset(Dataset):
             self.video_cam_infos=self.get_video_cam_infos(cam_folder)
         
     
-    def load_images_path(self, cam_folder, cam_extrinsics,cam_intrinsics,split):
-        image_length = len(os.listdir(os.path.join(cam_folder,"cam01")))
-        #len_cam=len(cam_extrinsics)
-        image_paths=[]
-        image_poses=[]
-        image_times=[]
+    def load_images_path(self, cam_folder, cam_extrinsics, cam_intrinsics, split):
+        image_paths = []
+        image_poses = []
+        image_times = []
+
         for idx, key in enumerate(cam_extrinsics):
             extr = cam_extrinsics[key]
             R = np.transpose(qvec2rotmat(extr.qvec))
             T = np.array(extr.tvec)
 
-            number = os.path.basename(extr.name)[5:-4]
-            images_folder=os.path.join(cam_folder,"cam"+number.zfill(2))
+            cam_id = f"cam{idx+1:0>2}"
+            images_folder = os.path.join(cam_folder, cam_id)
 
-            image_range=range(image_length)
-            if split=="test":
-                image_range = [image_range[0],image_range[int(image_length/3)],image_range[int(image_length*2/3)]]
+            print(f"Processing images from folder: {images_folder}")
 
-            for i in image_range:    
-                num=i+1
-                image_path=os.path.join(images_folder,"frame_"+str(num).zfill(5)+".jpg")
+            if not os.path.exists(images_folder):
+                print(f"Warning: Directory {images_folder} does not exist. Skipping.")
+                continue
+
+            image_length = len(os.listdir(images_folder))
+            image_range = range(image_length)
+            if split == "test":
+                image_range = [image_range[0], image_range[int(image_length / 3)], image_range[int(image_length * 2 / 3)]]
+
+            for i in image_range:
+                image_path = os.path.join(images_folder, f"frame_{i+1:0>5}.jpg")
+                if not os.path.exists(image_path):
+                    print(f"Warning: File not found: {image_path}")
+                    continue
                 image_paths.append(image_path)
-                image_poses.append((R,T))
-                image_times.append(float(i/image_length))
+                image_poses.append((R, T))
+                image_times.append(float(i / image_length))
 
-        return image_paths, image_poses,image_times
+        print(f"Loaded {len(image_paths)} image paths.")
+        return image_paths, image_poses, image_times
     
-    def get_video_cam_infos(self,datadir):
+    def get_video_cam_infos(self, datadir):
         poses_arr = np.load(os.path.join(datadir, "poses_bounds_multipleview.npy"))
         poses = poses_arr[:, :-2].reshape([-1, 3, 5])  # (N_cams, 3, 5)
         near_fars = poses_arr[:, -2:]
