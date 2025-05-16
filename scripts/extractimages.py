@@ -19,7 +19,9 @@ for camera_id in sorted(os.listdir(dir1)):
                 src_path = os.path.join(camera_dir, file_name)
                 dst_dir = os.path.join(images_path, camera_id)
                 os.mkdir(dst_dir)
-                dst_path = os.path.join(dst_dir, f"frame_00001.jpg")
+                dst_path = os.path.join(dst_dir, f"frame_00001_{Path(camera_dir).stem}.jpg")
                 shutil.copyfile(src_path, dst_path) 
+                shutil.copyfile(src_path, os.path.join(images_path, f"frame_00001_{Path(camera_dir).stem}.jpg")) 
+
 
 print("Done copying inital frames for 3D structure initialization.")
