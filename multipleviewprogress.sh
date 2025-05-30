@@ -32,20 +32,23 @@ for i in $(seq 1 14); do
     --SiftExtraction.estimate_affine_shape 1 \
     --SiftExtraction.domain_size_pooling 1
 done
-
+echo "Running exhaustive matcher"
 # Match extracted features between different views
 colmap exhaustive_matcher \
   --database_path ./colmap_tmp/database.db \
-  --SiftMatching.guided_matching 1
+  --SiftMatching.guided_matching 1 \
+  --TwoViewGeometry.min_num_inliers 10 
 
 # Copy pose priors obtained from kalibr
 mkdir ./colmap_tmp/sparse
 cp -r ./data/multipleview/$workdir/sparse_manual/ ./colmap_tmp/sparse_manual/
 
 # Convert kalibr calibration into binary format
+echo "Converting model from text to binary"
 mkdir ./colmap_tmp/sparse_manual_bin
 colmap model_converter --input_path ./colmap_tmp/sparse_manual/ --output_path ./colmap_tmp/sparse_manual_bin/ --output_type BIN
 
+echo "Running point triangulator"
 # Triangulate 3D points from manual reconstruction
 colmap point_triangulator \
   --database_path ./colmap_tmp/database.db \
@@ -53,17 +56,22 @@ colmap point_triangulator \
   --input_path ./colmap_tmp/sparse_manual_bin \
   --output_path ./colmap_tmp/sparse
 
+echo "Running mapper"
 colmap mapper \
     --database_path ./colmap_tmp/database.db \
     --input_path ./colmap_tmp/sparse \
     --image_path ./colmap_tmp/images \
     --output_path ./colmap_tmp/sparse \
-    --Mapper.ba_local_max_num_iterations=100 \
-    --Mapper.ba_global_max_num_iterations=200 \
-    --Mapper.init_num_trials=500  \
+    --Mapper.init_num_trials 500  \
+    --Mapper.ba_local_max_num_iterations 100 \
+    --Mapper.ba_global_max_num_iterations 200 \
     --Mapper.ba_refine_focal_length 0 \
     --Mapper.ba_refine_extra_params 0 \
+    --Mapper.ba_use_gpu 1 \
+    --Mapper.ba_gpu_index 0 \
     --Mapper.fix_existing_images 1 \
+    --Mapper.tri_min_angle 0.1 \
+    --Mapper.min_num_matches 12
 
 mkdir ./colmap_tmp/sparse/0
 mv ./colmap_tmp/sparse/cameras.bin ./colmap_tmp/sparse/0/
@@ -73,24 +81,34 @@ mv ./colmap_tmp/sparse/points3D.bin ./colmap_tmp/sparse/0/
 mkdir ./data/multipleview/$workdir/sparse_
 cp -r ./colmap_tmp/sparse/0/* ./data/multipleview/$workdir/sparse_
 
+echo "Running undistortion"
 mkdir ./colmap_tmp/dense
 colmap image_undistorter \
   --image_path ./colmap_tmp/images \
   --input_path ./colmap_tmp/sparse/0 \
   --output_path ./colmap_tmp/dense \
   --output_type COLMAP
+
+
+echo "Running patch match stereo"
 colmap patch_match_stereo \
   --workspace_path ./colmap_tmp/dense \
   --workspace_format COLMAP \
-  --PatchMatchStereo.geom_consistency=true \
-  --PatchMatchStereo.window_radius=7 \
-  --PatchMatchStereo.num_iterations=10
+  --PatchMatchStereo.max_image_size 800 \
+  --PatchMatchStereo.geom_consistency true \
+  --PatchMatchStereo.window_radius 13 \
+  --PatchMatchStereo.filter_min_ncc 0.35 \
+  --PatchMatchStereo.num_iterations 10 \
+  --PatchMatchStereo.geom_consistency_regularizer 0.5 \
+  --PatchMatchStereo.filter_min_triangulation_angle 2 
 
+echo "Running stereo fusion"
 colmap stereo_fusion \
   --workspace_path ./colmap_tmp/dense \
   --workspace_format COLMAP \
   --input_type geometric \
-  --output_path ./colmap_tmp/dense/fused.ply
+  --output_path ./colmap_tmp/dense/fused.ply \
+  --StereoFusion.min_num_pixels 7
 
 python scripts/downsample_point.py ./colmap_tmp/dense/fused.ply ./data/multipleview/$workdir/points3D_multipleview.ply
 
