@@ -29,13 +29,15 @@ class Camera(nn.Module):
         self.FoVx = FoVx
         self.FoVy = FoVy
         self.image_name = image_name
-        self.time = time
         try:
             self.data_device = torch.device(data_device)
         except Exception as e:
             print(e)
             print(f"[Warning] Custom device {data_device} failed, fallback to default cuda device" )
             self.data_device = torch.device("cuda")
+        self._time = torch.tensor(0.0) # Internal storage is always a tensor
+        self.time = time 
+       
         self.original_image = image.clamp(0.0, 1.0)[:3,:,:]
         # breakpoint()
         # .to(self.data_device)
@@ -62,6 +64,16 @@ class Camera(nn.Module):
         # .cuda()
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
+
+    @property
+    def time(self):
+        return self._time
+
+    @time.setter
+    def time(self, value):
+        if not isinstance(value, torch.Tensor):
+            value = torch.tensor(value, dtype=torch.float32)
+        self._time = value.to(self.data_device)
 
 class MiniCam:
     def __init__(self, width, height, fovy, fovx, znear, zfar, world_view_transform, full_proj_transform, time):

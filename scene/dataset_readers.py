@@ -18,6 +18,7 @@ from typing import NamedTuple
 from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
 from scene.hyper_loader import Load_hyper_data, format_hyper_data
+from scene.static_multicam_dataset import StaticMulticamDataset
 import torchvision.transforms as transforms
 import copy
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
@@ -256,7 +257,7 @@ def generateCamerasFromTransforms(path, template_transformsfile, extension, maxt
                             image_path=None, image_name=None, width=image.shape[1], height=image.shape[2],
                             time = time, mask=None))
     return cam_infos
-def readCamerasFromTransforms(path, transformsfile, white_background, extension=".png", mapper = {}):
+def readCamerasFromTransforms(path, transformsfile, white_background, extension=".jpg", mapper = {}):
     cam_infos = []
 
     with open(os.path.join(path, transformsfile)) as json_file:
@@ -310,7 +311,7 @@ def read_timeline(path):
         timestamp_mapper[time] = time/max_time_float
 
     return timestamp_mapper, max_time_float
-def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
+def readNerfSyntheticInfo(path, white_background, eval, extension=".jpg"):
     timestamp_mapper, max_time = read_timeline(path)
     print("Reading Training Transforms")
     train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json", white_background, extension, timestamp_mapper)
@@ -632,11 +633,100 @@ def readMultipleViewinfos(datadir,llffhold=8):
                            ply_path=ply_path)
     return scene_info
 
+def readLLFFMulticamInfo(datadir, llffhold=8):
+    # This loader is for LLFF/D-NeRF style data with camXX folders and a poses_bounds file.
+    print("Reading Multi-Camera LLFF-Style Data")
+    
+    from scene.multipleview_dataset import multipleview_dataset
+    
+    # Let the dataset class handle train/test splits internally
+    train_dataset = multipleview_dataset(datadir, "train", llffhold)
+    test_dataset = multipleview_dataset(datadir, "test", llffhold)
+
+    # To compute nerf_normalization, we need a list of CameraInfo objects for the training set.
+    # We can create a temporary list for this purpose.
+    temp_train_cam_list = []
+    for idx in range(len(train_dataset)):
+        # We don't need the actual image data here, just the camera parameters
+        _, (R, T), time = train_dataset[idx]
+        cam_info = CameraInfo(
+            uid=idx, R=R, T=T, 
+            FovY=train_dataset.FovY, FovX=train_dataset.FovX, 
+            image=None, image_path="", image_name=f"train_{idx}", 
+            width=train_dataset.width, height=train_dataset.height, 
+            time=time, mask=None
+        )
+        temp_train_cam_list.append(cam_info)
+
+    nerf_normalization = getNerfppNorm(temp_train_cam_list)
+
+    # Load the point cloud
+    ply_path = os.path.join(datadir, "points3D_multipleview.ply")
+    if not os.path.exists(ply_path):
+        ply_path = os.path.join(datadir, "sparse/0/points3D.ply") # Fallback
+        if not os.path.exists(ply_path):
+            print("No point cloud found. Creating a random one.")
+            num_pts = 100_000
+            xyz = np.random.random((num_pts, 3)) * 2.6 - 1.3
+            shs = np.random.random((num_pts, 3)) / 255.0
+            pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3)))
+            # The ply path for saving needs to be defined even if we create a random one
+            ply_path = os.path.join(datadir, "points3D.ply") 
+            storePly(ply_path, xyz, SH2RGB(shs) * 255)
+        else:
+            pcd = fetchPly(ply_path)
+    else:
+        pcd = fetchPly(ply_path)
+    
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_dataset,
+                           test_cameras=test_dataset,
+                           video_cameras=test_dataset.video_cam_infos, # Use the generated spiral path
+                           maxtime=0, 
+                           nerf_normalization=nerf_normalization,
+                           ply_path=ply_path)
+    return scene_info
+
+def readStaticMulticamInfo(path, llffhold=8):
+    print("Reading Static Multi-Camera JSON Data")
+    
+    train_dataset = StaticMulticamDataset(path, "train", llffhold)
+    test_dataset = StaticMulticamDataset(path, "test", llffhold)
+
+    # For NerfPP norm, create a temporary list of camera info
+    temp_train_cam_list = []
+    for i in range(len(train_dataset)):
+        _, (R, T), time, _ = train_dataset[i]
+        cam_info = CameraInfo(uid=i, R=R, T=T, FovY=train_dataset.fov_y, FovX=train_dataset.fov_x, image=None, image_path="", image_name=f"train_{i}", width=train_dataset.width, height=train_dataset.height, time=time, mask=None)
+        temp_train_cam_list.append(cam_info)
+    nerf_normalization = getNerfppNorm(temp_train_cam_list)
+
+    # Load point cloud
+    ply_path = os.path.join(path, "points3D.ply")
+    pcd = fetchPly(ply_path) if os.path.exists(ply_path) else None
+    if pcd is None:
+        print("Warning: points3D.ply not found.")
+
+    scene_info = SceneInfo(
+        point_cloud=pcd,
+        train_cameras=train_dataset,
+        test_cameras=test_dataset,
+        video_cameras=test_dataset, # Use test set for video path
+        maxtime=1.0, 
+        nerf_normalization=nerf_normalization,
+        ply_path=ply_path
+    )
+    return scene_info
+
+
+
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
     "Blender" : readNerfSyntheticInfo,
     "dynerf" : readdynerfInfo,
     "nerfies": readHyperDataInfos,  # NeRFies & HyperNeRF dataset proposed by [https://github.com/google/hypernerf/releases/tag/v0.1]
     "PanopticSports" : readPanopticSportsinfos,
-    "MultipleView": readMultipleViewinfos
+    "Static_Multicam": readStaticMulticamInfo,
+    "MultipleView": readMultipleViewinfos,
+    # "LLFF_Multicam": readLLFFMulticamInfo 
 }

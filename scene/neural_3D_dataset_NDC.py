@@ -262,8 +262,10 @@ class Neural3D_NDC_Dataset(Dataset):
         poses_arr = np.load(os.path.join(self.root_dir, "poses_bounds.npy"))
         poses = poses_arr[:, :-2].reshape([-1, 3, 5])  # (N_cams, 3, 5)
         self.near_fars = poses_arr[:, -2:]
-        videos = glob.glob(os.path.join(self.root_dir, "cam*.mp4"))
-        videos = sorted(videos)
+        # 1. Find all entries matching "cam*"
+        all_cam_paths = glob.glob(os.path.join(self.root_dir, "cam*"))
+        # 2. Filter this list to keep only the directories. This correctly ignores files like events.pt.
+        videos = sorted([p for p in all_cam_paths if os.path.isdir(p)])
         # breakpoint()
         assert len(videos) == poses_arr.shape[0]
 
