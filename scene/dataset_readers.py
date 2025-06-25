@@ -127,7 +127,23 @@ def fetchPly(path):
     vertices = plydata['vertex']
     positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
     colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
-    normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    
+    if 'red' in vertices.data.dtype.names:
+        colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
+    else:
+        # Create random colors if they don't exist
+        colors = np.random.random(positions.shape)
+
+    
+    if 'nx' in vertices.data.dtype.names and 'ny' in vertices.data.dtype.names and 'nz' in vertices.data.dtype.names:
+        # Normals exist in the PLY file
+        print("Found normals in PLY file.")
+        normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    else:
+        # Normals do not exist, create a placeholder array of zeros
+        # This is the expected case for sparse COLMAP output.
+        print("Warning: No normals found in PLY file. Creating placeholder normals.")
+        normals = np.zeros_like(positions)
     return BasicPointCloud(points=positions, colors=colors, normals=normals)
 
 def storePly(path, xyz, rgb):

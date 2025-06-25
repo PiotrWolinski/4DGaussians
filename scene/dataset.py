@@ -19,51 +19,22 @@ class FourDGSdataset(Dataset):
 
     def __getitem__(self, index):
         if isinstance(index, slice):
-            # If we get a slice, process and return the first item of the slice.
-            start, stop, step = index.indices(len(self))
-            if step != 1:
-                raise ValueError("Slicing with a step is not supported.")
-            index = start
-        # This is the primary path for your new dataset format.
-        # "MultipleView" is also added to catch the case if the loader identifies it differently.
-        if self.dataset_type in ["LLFF_Multicam", "dynerf", "MultipleView"]:
-            # 1. Unpack the tuple returned by multipleview_dataset
-            image, (R, T), time = self.dataset[index]
-            
-            # 2. Access the focal length as a scalar attribute
-            focal_length = self.dataset.focal 
-            
-            # 3. Calculate Field of View from the scalar focal length
-            FovX = focal2fov(focal_length, image.shape[2]) # image.shape[2] is width
-            FovY = focal2fov(focal_length, image.shape[1]) # image.shape[1] is height
-            
-            # 4. Set other metadata for the Camera object
-            mask = None
-            image_name = f"{index}"
-            uid = index
-            colmap_id = index
-            
-        elif self.dataset_type == "PanopticSports":
-            # This case remains as is
-            return self.dataset[index]
-            
-        else:
-            # This is the fallback for original Colmap and Blender loaders
-            # It expects a CameraInfo object, not a tuple.
-            caminfo = self.dataset[index]
-            image = caminfo.image
-            R = caminfo.R
-            T = caminfo.T
-            FovX = caminfo.FovX
-            FovY = caminfo.FovY
-            time = caminfo.time
-            mask = caminfo.mask
-            image_name = caminfo.image_name
-            uid = caminfo.uid
-            colmap_id = uid 
+            return [self[i] for i in range(*index.indices(len(self)))]
 
-        # This check was moved from the `else` block to apply to ALL cases.
-        # It ensures 'time' is always a tensor, preventing the TypeError.
+        # All our supported data loaders now return a consistent tuple format.
+        # Unpack the tuple from the underlying dataset (e.g., StaticMulticamDataset)
+        image, (R, T), time, global_idx = self.dataset[index]
+        
+        # Get the FoV from the dataset object's attributes
+        FovX = self.dataset.fov_x
+        FovY = self.dataset.fov_y
+        
+        # Other metadata for the Camera object
+        mask = None
+        image_name = f"{global_idx}" # Use the global index for a unique name
+        uid = global_idx
+        colmap_id = global_idx # Use the global index for event map lookup
+
         if not isinstance(time, torch.Tensor):
             time = torch.tensor(time, dtype=torch.float32)
 

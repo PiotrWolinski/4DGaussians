@@ -32,10 +32,9 @@ OptimizationParams = dict(
     # pruning_interval = 2000
 )
 ModelParams = dict(
-    use_event=True, # Set to True to activate event-based training
-    extension=".jpg"
-    # You can also override the lambda weight here if you want
-    # lambda_event = 0.05 
+    use_event=True, 
+    extension=".jpg",
+    lambda_event = 0.05 
 )
 
 # ModelParams = dict(

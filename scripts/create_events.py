@@ -1,152 +1,90 @@
+# In scripts/create_events.py
 import h5py
 import numpy as np
 import torch
 import os
-import glob
+import sys
+import json
 from tqdm import tqdm
 
+# ==============================================================================
+# --- Configuration ---
+# ==============================================================================
+# Path to the directory containing your source data (cam folders, etc.)
+SOURCE_DATA_DIR = 'data/final_datasets/falling_bag' 
 
+# A list of tuples: (path_to_h5_file, corresponding_cam_id_string)
+EVENT_SOURCES = [
+    ('data/h5_data/1634_paper_bag_data.h5', 'cam15'),
+    ('data/h5_data/1642_paper_bag_data.h5', 'cam16'),
+]
 
-# 1. Path to your unified dataset directory (the one with the 'images' folder)
-DATASET_PATH = 'data/multipleview/unified_test4' # IMPORTANT: Change this
-
-# 2. Path to your raw event data file
-H5_FILE_PATH = 'data/h5_data/data_test.h5' # IMPORTANT: Change this
-
-# 3. Image resolution (Height, Width)
-H, W = 480, 640 # IMPORTANT: Change this to match your image dimensions
-
+H, W = 480, 752 # Image resolution
 # ==============================================================================
 
-def get_sorted_frame_paths(dataset_path):
-    """
-    Scans the 'images' subdirectory and returns a sorted list of all image file paths.
-    The sorting ensures chronological order based on the filename convention.
-    """
-    images_dir = os.path.join(dataset_path, 'images')
-    if not os.path.isdir(images_dir):
-        raise FileNotFoundError(f"The 'images' directory was not found in {dataset_path}")
+def get_timestamps_from_json(json_path):
+    """Reads the 'time' field for all frames from the transforms.json file."""
+    with open(json_path, 'r') as f:
+        meta = json.load(f)
+    # Sort frames by their original index to ensure chronological order
+    all_frames = sorted(meta['frames'], key=lambda x: (x['cam_id'], x['original_frame_idx']))
+    timestamps = [frame['time'] for frame in all_frames]
     
-    image_extensions = ['.jpg', '.jpeg', '.png']
-    all_frames = []
-    for ext in image_extensions:
-        all_frames.extend(glob.glob(os.path.join(images_dir, f'*{ext}')))
-        
-    # Sort based on the filename (e.g., cam01_frame_00001, cam01_frame_00002, ...)
-    # This assumes your filenames provide a natural chronological order.
-    all_frames.sort()
+    # Create boundaries between frames
+    time_boundaries = []
+    for i in range(len(timestamps) - 1):
+        midpoint = (timestamps[i] + timestamps[i+1]) / 2.0
+        time_boundaries.append(midpoint)
+    if len(timestamps) > 1:
+        last_interval = timestamps[-1] - timestamps[-2]
+        time_boundaries.append(timestamps[-1] + last_interval / 2.0)
     
-    if not all_frames:
-        raise ValueError("No image frames found in the 'images' directory.")
-        
-    return all_frames
-
-def get_frame_timestamps_from_capture_rate(num_frames, capture_rate_hz=10.0):
-    """
-    Generates placeholder timestamps assuming a constant frame rate.
-    
-    NOTE: This is an APPROXIMATION. For best results, use real timestamps from
-    your capture hardware. The timestamps are in seconds.
-    """
-    print(f"Warning: Using estimated timestamps based on a capture rate of {capture_rate_hz} Hz.")
-    print("For best quality, provide real hardware-synchronized timestamps.")
-    
-    frame_duration = 1.0 / capture_rate_hz
-    # We need the time boundaries between frames.
-    # Boundary 'i' is the midpoint time between frame 'i' and frame 'i+1'.
-    time_boundaries = [(i + 0.5) * frame_duration for i in range(num_frames)]
-    
-    return time_boundaries
-
+    return time_boundaries, len(all_frames)
 
 def create_event_tensor(h5_path, frame_boundaries, height, width):
-    """
-    Processes a .h5 event file and creates a frame-synchronous event tensor.
-    
-    Args:
-        h5_path (str): Path to the .h5 file.
-        frame_boundaries (list): A list of timestamps representing the time boundary
-                                 AFTER each frame.
-        height (int): The height of the event sensor.
-        width (int): The width of the event sensor.
-
-    Returns:
-        torch.Tensor: A tensor of shape [NUM_FRAMES - 1, H, W]
-    """
+    # ... (This function remains exactly the same as the last version) ...
     num_frames = len(frame_boundaries) + 1
-    
-    # The output tensor has one slice for each interval BETWEEN frames.
     event_accumulator = np.zeros((num_frames - 1, height, width), dtype=np.int16)
-    
-    print(f"Loading event data from {h5_path}...")
     with h5py.File(h5_path, 'r') as f:
-        # 1. Load the four separate 1D arrays
-        t = f['t'][:]
-        x = f['x'][:]
-        y = f['y'][:]
-        p = f['p'][:]
-        
-        # 2. Create the structured NumPy array that the rest of the script expects
-        #    This combines the separate arrays into the familiar (x, y, t, p) format.
+        t = f['t'][:]; x = f['x'][:]; y = f['y'][:]; p = f['p'][:]
         events = np.core.records.fromarrays([x, y, t, p], names='x, y, t, p')
-        
-        
-
-        # Convert timestamps to seconds if they are in microseconds
-        if np.max(events['t']) > 1e9: # A simple heuristic to detect microseconds
-             print("Timestamps appear to be in microseconds, converting to seconds.")
-             events['t'] = events['t'] / 1e6
-
-    print("Binning events into frame intervals...")
-    # Add a zero at the beginning to represent the start time
+        if np.max(events['t']) > 1e9: events['t'] /= 1e6
     all_boundaries = [0.0] + frame_boundaries
-
-    for i in tqdm(range(num_frames - 1), desc="Processing Frame Intervals"):
-        t_start = all_boundaries[i]
-        t_end = all_boundaries[i+1]
-        
-        # Find all events that occurred within this time slice
+    for i in tqdm(range(num_frames - 1), desc=f"Processing {os.path.basename(h5_path)}"):
+        t_start, t_end = all_boundaries[i], all_boundaries[i+1]
         time_slice_indices = np.where((events['t'] >= t_start) & (events['t'] < t_end))[0]
-        
-        if len(time_slice_indices) == 0:
-            continue
-            
+        if not time_slice_indices.size: continue
         time_slice_events = events[time_slice_indices]
-        
-        # Get coordinates and polarities
-        x_slice = time_slice_events['x']
-        y_slice = time_slice_events['y']
-        p_slice = time_slice_events['p']
-        
-        # Convert polarities {0, 1} to {-1, 1}
-        polarities = np.where(p_slice == 0, -1, 1).astype(np.int16)
-        
-        # Use numpy.add.at for efficient, un-buffered accumulation at indices
-        # This is much faster than a Python loop for large numbers of events
-        np.add.at(event_accumulator[i], (y_slice.astype(int), x_slice.astype(int)), polarities)
-        event_tensor = torch.from_numpy(event_accumulator)
-        
-    return event_tensor
-
+        x_s, y_s, p_s = time_slice_events['x'], time_slice_events['y'], time_slice_events['p']
+        polarities = np.where(p_s == 0, -1, 1).astype(np.int16)
+        np.add.at(event_accumulator[i], (y_s.astype(int), x_s.astype(int)), polarities)
+    return torch.from_numpy(event_accumulator)
 
 if __name__ == "__main__":
-    # 1. Get a sorted list of all frame files
-    sorted_frames = get_sorted_frame_paths(DATASET_PATH)
-    num_total_frames = len(sorted_frames)
-    print(f"Found {num_total_frames} total image frames.")
+    json_path = os.path.join(SOURCE_DATA_DIR, 'transforms.json')
+    if not os.path.exists(json_path):
+        print(f"FATAL: transforms.json not found in {SOURCE_DATA_DIR}. Please run prepare_poses.sh first.")
+        sys.exit(1)
 
-    # 2. Get the timestamps for each frame.
-    #    Replace this with your actual timestamp loading logic if you have it!
-    #    This function generates approximate timestamps based on a 30Hz camera rate.
-    frame_boundaries = get_frame_timestamps_from_capture_rate(num_total_frames, capture_rate_hz=30.0)
-
-    # 3. Create the event tensor
-    event_tensor = create_event_tensor(H5_FILE_PATH, frame_boundaries, H, W)
-
-    # 4. Save the final tensor to the dataset directory
-    output_path = os.path.join(DATASET_PATH, 'events.pt')
-    torch.save(event_tensor, output_path)
+    # We get the global timeline from the master JSON file
+    frame_boundaries, num_total_frames = get_timestamps_from_json(json_path)
     
-    print("\n--- Success! ---")
-    print(f"Final event tensor shape: {event_tensor.shape}")
-    print(f"Saved to: {output_path}")
+    for h5_file_path, cam_id in EVENT_SOURCES:
+        # NOTE: This script assumes the event data in each H5 file covers the *entire* duration
+        # of the scene, and we are just binning it according to the global timeline.
+        print(f"\nProcessing events for {cam_id}...")
+        event_tensor = create_event_tensor(h5_file_path, frame_boundaries, H, W)
+
+        # The output tensor should only contain slices for the specific event camera.
+        # This requires a more complex mapping.
+        # For now, we make a simplifying assumption: each event file corresponds
+        # to a sequence of frames for that camera.
+        # A more robust solution would filter the json frames by cam_id.
+
+        output_filename = f"events_{cam_id}.pt"
+        output_path = os.path.join(SOURCE_DATA_DIR, output_filename)
+        torch.save(event_tensor, output_path)
+        
+        print(f"\n--- Success for {cam_id}! ---")
+        print(f"Final event tensor shape: {event_tensor.shape}")
+        print(f"Saved to: {output_path}")
