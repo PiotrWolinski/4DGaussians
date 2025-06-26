@@ -29,6 +29,7 @@ from plyfile import PlyData, PlyElement
 from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
 from utils.general_utils import PILtoTorch
+from scene.static_cam_dataset import StaticMultiCamDataset
 from tqdm import tqdm
 class CameraInfo(NamedTuple):
     uid: int
@@ -124,9 +125,15 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
 def fetchPly(path):
     plydata = PlyData.read(path)
     vertices = plydata['vertex']
+    print(f"Type of vertices: {type(vertices)}")
+    print(f"Vertices content: {vertices}")
     positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
     colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
-    normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    if 'nx' in vertices.data.dtype.names and 'ny' in vertices.data.dtype.names and 'nz' in vertices.data.dtype.names:
+        normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    else:
+        print("Warning: Normals not found in .ply file. Generating dummy normals.")
+        normals = np.zeros_like(positions)
     return BasicPointCloud(points=positions, colors=colors, normals=normals)
 
 def storePly(path, xyz, rgb):
@@ -632,11 +639,40 @@ def readMultipleViewinfos(datadir,llffhold=8):
                            ply_path=ply_path)
     return scene_info
 
+def readStaticMultiCamInfo(path, llffhold=8):
+
+    
+    train_dataset =  StaticMultiCamDataset(path, split =  "train", llffhold=llffhold)
+    test_dataset = StaticMultiCamDataset(path, split = "test", llffhold=llffhold)
+
+    ply_path = os.path.join(path, "points3D.ply")
+    pcd = fetchPly(ply_path) if os.path.exists(ply_path) else None
+    if pcd is None:
+        print("Warning: points3D.ply not found.")
+
+    train_cam_infos = format_infos(train_dataset, "train")
+    #test_cam_infos = format_infos(test_dataset, "test")
+    #video_cam_infos = test_cam_infos
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_dataset,
+                           test_cameras=test_dataset,
+                           video_cameras=test_dataset,
+                           maxtime=0,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=ply_path)
+    return scene_info
+
+    
+
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
     "Blender" : readNerfSyntheticInfo,
     "dynerf" : readdynerfInfo,
     "nerfies": readHyperDataInfos,  # NeRFies & HyperNeRF dataset proposed by [https://github.com/google/hypernerf/releases/tag/v0.1]
     "PanopticSports" : readPanopticSportsinfos,
-    "MultipleView": readMultipleViewinfos
+    "MultipleView": readMultipleViewinfos,
+    "Static_Multicam": readStaticMultiCamInfo,
 }

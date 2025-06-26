@@ -132,6 +132,8 @@ def scene_reconstruction(
         #
     count = 0
     for iteration in range(first_iter, final_iter + 1):
+        
+
         if network_gui.conn == None:
             network_gui.try_connect()
         while network_gui.conn != None:

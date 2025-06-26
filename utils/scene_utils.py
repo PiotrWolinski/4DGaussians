@@ -29,6 +29,9 @@ def render_training_image(scene, gaussians, viewpoints, render_func, pipe, backg
         depth_np = depth.permute(1, 2, 0).cpu().numpy()
         depth_np /= depth_np.max()
         depth_np = np.repeat(depth_np, 3, axis=2)
+        if gt_np.shape[2] == 1 and image_np.shape[2] == 3:
+            
+            gt_np = np.repeat(gt_np, 3, axis=2)
         image_np = np.concatenate((gt_np, image_np, depth_np), axis=1)
         image_with_labels = Image.fromarray((np.clip(image_np,0,1) * 255).astype('uint8'))  
         draw1 = ImageDraw.Draw(image_with_labels)
