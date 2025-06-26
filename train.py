@@ -30,6 +30,7 @@ import lpips
 from utils.scene_utils import render_training_image
 from time import time
 import copy
+from event_loss import event_loss_call
 
 to8b = lambda x: (255 * np.clip(x.cpu().numpy(), 0, 1)).astype(np.uint8)
 
@@ -59,7 +60,6 @@ def scene_reconstruction(
     timer,
 ):
     first_iter = 0
-
     gaussians.training_setup(opt)
     if checkpoint:
         # breakpoint()
@@ -77,7 +77,7 @@ def scene_reconstruction(
     iter_start = torch.cuda.Event(enable_timing=True)
     iter_end = torch.cuda.Event(enable_timing=True)
 
-    viewpoint_stack = None
+    viewpoint_stack = list(scene.getTrainCameras())
     ema_loss_for_log = 0.0
     ema_psnr_for_log = 0.0
 
@@ -85,20 +85,40 @@ def scene_reconstruction(
 
     progress_bar = tqdm(range(first_iter, final_iter), desc="Training progress")
     first_iter += 1
+
+    
+    if dataset.use_event:
+        print("---------------event_data_loading----------------")
+        event_map_1 = torch.load(os.path.join(dataset.source_path, "event_cam15.pt"))
+        event_map_2 = torch.load(os.path.join(dataset.source_path, "event_cam16.pt"))
+        print("Event camera 1 size: " + str(event_map_1.size()))
+        print("Event camera 2 size: " + str(event_map_2.size()))
+        event_map_1 = event_map_1.to(device="cuda")
+        event_map_2 = event_map_2.to(device="cuda")
+        combination = []
+        for m in range(4):
+            for n in range(m + 1, 5):
+                combination.append([m, n])
+
+
     # lpips_model = lpips.LPIPS(net="alex").cuda()
     video_cams = scene.getVideoCameras()
     test_cams = scene.getTestCameras()
     train_cams = scene.getTrainCameras()
+
+    temp_list = list(scene.getTrainCameras())
 
     if not viewpoint_stack and not opt.dataloader:
         # dnerf's branch
         viewpoint_stack = [i for i in train_cams]
         temp_list = copy.deepcopy(viewpoint_stack)
     #
-    batch_size = opt.batch_size
+    batch_size = opt.batch_size if opt.batch_size > 0 else 1
     print("data loading done")
     if opt.dataloader:
-        viewpoint_stack = scene.getTrainCameras()
+        viewpoint_stack = list(scene.getTrainCameras() )
+        if len(viewpoint_stack) == 0:
+            raise ValueError("The dataset (viewpoint_stack) is empty. Cannot create DataLoader.")
         if opt.custom_sampler is not None:
             sampler = FineSampler(viewpoint_stack)
             viewpoint_stack_loader = DataLoader(
@@ -195,22 +215,29 @@ def scene_reconstruction(
 
         # Pick a random Camera
 
+        if not viewpoint_stack:
+            viewpoint_stack = list(scene.getTrainCameras())  
+        viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack) - 1))
+
         # dynerf's branch
         if opt.dataloader and not load_in_memory:
             try:
                 viewpoint_cams = next(loader)
             except StopIteration:
+                print("\n--- DEBUG: StopIteration caught. Attempting to reset DataLoader. ---")
+                print(f"Current length of viewpoint_stack: {len(viewpoint_stack)}")
+                print(f"Is random_loader True? {random_loader}")
                 print("reset dataloader into random dataloader.")
-                if not random_loader:
-                    viewpoint_stack_loader = DataLoader(
-                        viewpoint_stack,
-                        batch_size=opt.batch_size,
-                        shuffle=True,
-                        num_workers=32,
-                        collate_fn=list,
-                    )
-                    random_loader = True
+                viewpoint_stack_loader = DataLoader(
+                    temp_list, 
+                    batch_size=opt.batch_size,
+                    shuffle=True,
+                    num_workers=32,
+                    collate_fn=list,
+                )
+                random_loader = True 
                 loader = iter(viewpoint_stack_loader)
+                viewpoint_cams = next(loader)
 
         else:
             idx = 0
@@ -257,6 +284,13 @@ def scene_reconstruction(
             else:
                 gt_image = viewpoint_cam["image"].cuda()
 
+            # Determine image index
+            img_i = viewpoint_cam.image_name
+            if scene.dataset_type == "synthetic":
+                img_i = int(img_i.split('_')[1]) // 2
+            else:
+                img_i = int(img_i) // 5
+
             gt_images.append(gt_image.unsqueeze(0))
             radii_list.append(radii.unsqueeze(0))
             visibility_filter_list.append(visibility_filter.unsqueeze(0))
@@ -268,12 +302,37 @@ def scene_reconstruction(
         gt_image_tensor = torch.cat(gt_images, 0)
         # Loss
         # breakpoint()
+        # Calculate event loss
+        if dataset.use_event:
+            event_data_1 = event_map_1[img_i].clone()
+            event_data_2 = event_map_2[img_i].clone()
+            event_loss_1 = event_loss_call(
+                event_data_1,
+                combination,
+                viewpoint_cam.image_height,
+                viewpoint_cam.image_width,
+                iteration,
+                img_i,
+            ) * 0.02
+            event_loss_2 = event_loss_call(
+                event_data_2,
+                combination,
+                viewpoint_cam.image_height,
+                viewpoint_cam.image_width,
+                iteration,
+                img_i,
+            ) * 0.02
+            event_loss = event_loss_1 + event_loss_2
+        else:
+            event_loss = torch.tensor(0, dtype=torch.float64)
+
+
         Ll1 = l1_loss(image_tensor, gt_image_tensor[:, :3, :, :])
 
         psnr_ = psnr(image_tensor, gt_image_tensor).mean().double()
         # norm
 
-        loss = Ll1
+        loss_img = Ll1
         if stage == "fine" and hyper.time_smoothness_weight != 0:
             # tv_loss = 0
             tv_loss = gaussians.compute_regulation(
@@ -281,14 +340,14 @@ def scene_reconstruction(
                 hyper.l1_time_planes,
                 hyper.plane_tv_weight,
             )
-            loss += tv_loss
+            loss_img += tv_loss
         if opt.lambda_dssim != 0:
             ssim_loss = ssim(image_tensor, gt_image_tensor)
-            loss += opt.lambda_dssim * (1.0 - ssim_loss)
+            loss_img += opt.lambda_dssim * (1.0 - ssim_loss)
         # if opt.lambda_lpips !=0:
         #     lpipsloss = lpips_loss(image_tensor,gt_image_tensor,lpips_model)
         #     loss += opt.lambda_lpips * lpipsloss
-
+        loss = loss_img + event_loss
         loss.backward()
         if torch.isnan(loss).any():
             print("loss is nan,end training, reexecv program now.")
@@ -725,6 +784,9 @@ if __name__ == "__main__":
 
         config = mmcv.Config.fromfile(args.configs)
         args = merge_hparams(args, config)
+    
+    
+
     print("Optimizing " + args.model_path)
 
     # Initialize system state (RNG)

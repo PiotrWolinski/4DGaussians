@@ -32,6 +32,10 @@ OptimizationParams = dict(
     # pruning_interval = 2000
 )
 
+ModelParams = dict(
+    use_event=False
+)
+
 # ModelParams = dict(
 #     extension=".jpg",
 #     add_points=True

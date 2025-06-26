@@ -19,7 +19,7 @@ def lin_log(x, threshold=20):
     return y.float()
 
 
-def event_loss_call(all_rgb, event_data, combination, rgb2gray, resolution_h, resolution_w, iteration, img_i):
+def event_loss_call(event_data, combination, resolution_h, resolution_w, iteration, img_i):
     '''
     simulate the generation of event stream and calculate the event loss
     '''
@@ -29,8 +29,8 @@ def event_loss_call(all_rgb, event_data, combination, rgb2gray, resolution_h, re
     for its in range(10):
         start = chose[its][0]
         end = chose[its][1]
-        thres_pos = (lin_log(torch.sum(all_rgb[end] * rgb2gray, dim=0)*255) - lin_log(torch.sum(all_rgb[start] * rgb2gray, dim=0)*255)) / 0.3
-        thres_neg = (lin_log(torch.sum(all_rgb[end] * rgb2gray, dim=0)*255) - lin_log(torch.sum(all_rgb[start] * rgb2gray, dim=0)*255)) / 0.2
+        thres_pos = (lin_log(event_data[end] * 255) - lin_log(event_data[start] * 255)) / 0.3
+        thres_neg = (lin_log(event_data[end] * 255) - lin_log(event_data[start] * 255)) / 0.2
         event_clone = event_data.clone()
         event_cur = event_clone[start].view(resolution_h, resolution_w)
         for j in range(start + 1, end):
