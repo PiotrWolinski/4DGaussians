@@ -33,7 +33,7 @@ OptimizationParams = dict(
 )
 
 ModelParams = dict(
-    use_event=False
+    use_event=True
 )
 
 # ModelParams = dict(

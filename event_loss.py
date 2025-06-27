@@ -23,18 +23,39 @@ def event_loss_call(event_data, combination, resolution_h, resolution_w, iterati
     '''
     simulate the generation of event stream and calculate the event loss
     '''
-    
+
+    # Ensure event_data is 1D
+    if event_data.dim() != 1:
+        raise ValueError(f"event_data must be a 1D tensor, but got shape {event_data.shape}")
     loss = []
     chose = random.sample(combination, 10)
     for its in range(10):
+        
         start = chose[its][0]
         end = chose[its][1]
-        thres_pos = (lin_log(event_data[end] * 255) - lin_log(event_data[start] * 255)) / 0.3
-        thres_neg = (lin_log(event_data[end] * 255) - lin_log(event_data[start] * 255)) / 0.2
+
+        if start >= event_data.size(0) or end > event_data.size(0):
+            print(f"Skipping iteration {its} due to out-of-bounds indices: start={start}, end={end}")
+            continue
+
+        
+        
+        # Calculate thresholds
+        start_value = lin_log(event_data[start] * 255)
+        end_value = lin_log(event_data[end - 1] * 255)
+        
+
+        thres_pos = (end_value - start_value) / 0.3
+        thres_neg = (end_value - start_value) / 0.2
+        
         event_clone = event_data.clone()
-        event_cur = event_clone[start].view(resolution_h, resolution_w)
-        for j in range(start + 1, end):
-            event_cur += event_clone[j].view(resolution_h, resolution_w)
+        
+        
+        event_cur = event_clone[start:end].sum()
+        
+        
+        #for j in range(start + 1, end):
+         #   event_cur += event_clone[j, :]
         
         pos = event_cur >= 0
         neg = event_cur <= 0
@@ -42,8 +63,9 @@ def event_loss_call(event_data, combination, resolution_h, resolution_w, iterati
 
         loss_pos = torch.mean(((thres_pos * pos) - ((event_cur + 0.5) * pos)) ** 2)
         loss_neg = torch.mean(((thres_neg * neg) - ((event_cur - 0.5) * neg)) ** 2)
-
+        
         loss.append(loss_pos + loss_neg)
 
     event_loss = torch.mean(torch.stack(loss, dim=0), dim=0)
+    
     return event_loss

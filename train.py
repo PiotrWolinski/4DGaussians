@@ -89,8 +89,8 @@ def scene_reconstruction(
     
     if dataset.use_event:
         print("---------------event_data_loading----------------")
-        event_map_1 = torch.load(os.path.join(dataset.source_path, "event_cam15.pt"))
-        event_map_2 = torch.load(os.path.join(dataset.source_path, "event_cam16.pt"))
+        event_map_1 = torch.load(os.path.join(dataset.source_path, "events_cam15.pt"))
+        event_map_2 = torch.load(os.path.join(dataset.source_path, "events_cam16.pt"))
         print("Event camera 1 size: " + str(event_map_1.size()))
         print("Event camera 2 size: " + str(event_map_2.size()))
         event_map_1 = event_map_1.to(device="cuda")
@@ -224,10 +224,7 @@ def scene_reconstruction(
             try:
                 viewpoint_cams = next(loader)
             except StopIteration:
-                print("\n--- DEBUG: StopIteration caught. Attempting to reset DataLoader. ---")
-                print(f"Current length of viewpoint_stack: {len(viewpoint_stack)}")
-                print(f"Is random_loader True? {random_loader}")
-                print("reset dataloader into random dataloader.")
+                
                 viewpoint_stack_loader = DataLoader(
                     temp_list, 
                     batch_size=opt.batch_size,
@@ -304,8 +301,11 @@ def scene_reconstruction(
         # breakpoint()
         # Calculate event loss
         if dataset.use_event:
-            event_data_1 = event_map_1[img_i].clone()
-            event_data_2 = event_map_2[img_i].clone()
+            
+            event_data_1 = event_map_1[img_i].clone().squeeze()
+            event_data_2 = event_map_2[img_i].clone().squeeze()
+            
+            
             event_loss_1 = event_loss_call(
                 event_data_1,
                 combination,
@@ -313,7 +313,7 @@ def scene_reconstruction(
                 viewpoint_cam.image_width,
                 iteration,
                 img_i,
-            ) * 0.02
+            ) * 0.001
             event_loss_2 = event_loss_call(
                 event_data_2,
                 combination,
@@ -321,7 +321,7 @@ def scene_reconstruction(
                 viewpoint_cam.image_width,
                 iteration,
                 img_i,
-            ) * 0.02
+            ) * 0.001
             event_loss = event_loss_1 + event_loss_2
         else:
             event_loss = torch.tensor(0, dtype=torch.float64)
@@ -349,6 +349,7 @@ def scene_reconstruction(
         #     loss += opt.lambda_lpips * lpipsloss
         loss = loss_img + event_loss
         loss.backward()
+        
         if torch.isnan(loss).any():
             print("loss is nan,end training, reexecv program now.")
             os.execv(sys.executable, [sys.executable] + sys.argv)
@@ -367,9 +368,9 @@ def scene_reconstruction(
             if iteration % 10 == 0:
                 progress_bar.set_postfix(
                     {
-                        "Loss": f"{ema_loss_for_log:.{7}f}",
+                        "Loss": f"{ema_loss_for_log:.{5}f}",
                         "psnr": f"{psnr_:.{2}f}",
-                        "point": f"{total_point}",
+                        "Event Loss": f"{event_loss.item():.{5}f}",
                     }
                 )
                 progress_bar.update(10)
@@ -508,6 +509,7 @@ def scene_reconstruction(
             # Optimizer step
             if iteration < opt.iterations:
                 gaussians.optimizer.step()
+                
                 gaussians.optimizer.zero_grad(set_to_none=True)
 
             if iteration in checkpoint_iterations:
