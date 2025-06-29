@@ -307,6 +307,7 @@ def scene_reconstruction(
             
             
             event_loss_1 = event_loss_call(
+                image_tensor,
                 event_data_1,
                 combination,
                 viewpoint_cam.image_height,
@@ -315,6 +316,7 @@ def scene_reconstruction(
                 img_i,
             ) * 0.001
             event_loss_2 = event_loss_call(
+                image_tensor,
                 event_data_2,
                 combination,
                 viewpoint_cam.image_height,

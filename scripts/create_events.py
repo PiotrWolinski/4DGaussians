@@ -5,6 +5,27 @@ import os
 import sys
 import json
 from tqdm import tqdm
+import cv2
+
+
+EVENT_CAMERA_PARAMS = {
+    "cam15": {
+        "K": np.array([
+            [444.11582755, 0, 327.73888769],  # [fx, 0, cx]
+            [0, 445.28439246, 221.25515107],  # [0, fy, cy]
+            [0, 0, 1.0]
+        ]),
+        "D": np.array([-0.3353364, 0.11296593, 0.00115195, -0.00364223]) # [k1, k2, p1, p2]
+    },
+    "cam16": {
+        "K": np.array([
+            [427.20830098, 0, 325.60321272],  # [fx, 0, cx]
+            [0, 432.00697177, 240.44006261],  # [0, fy, cy]
+            [0, 0, 1.0]
+        ]),
+        "D": np.array([-0.30277843, 0.08794749, -0.00079008, 0.00287706]) # [k1, k2, p1, p2]
+    }
+}
 
 SOURCE_DATA_DIR = 'data/final_dataset/falling_bag' 
 
@@ -31,6 +52,26 @@ def get_timestamps_from_json(txt_path):
 
 
 def create_event_tensor(h5_path, frame_boundaries, height, width):
+
+    cam_params = EVENT_CAMERA_PARAMS[cam_id]
+    K = cam_params["K"]
+    D = cam_params["D"]
+
+    mapx, mapy = cv2.initUndistortRectifyMap(K, D, None, K, (width, height), cv2.CV_32FC1)
+
+    x_int = events['x'].astype(int)
+    y_int = events['y'].astype(int)
+
+    valid_mask = (x_int < width) & (y_int < height) & (x_int >= 0) & (y_int >= 0)
+
+    x_undistorted = mapx[y_int[valid_mask], x_int[valid_mask]]
+    y_undistorted = mapy[y_int[valid_mask], x_int[valid_mask]]
+
+    undistorted_events = events[valid_mask].copy()
+    undistorted_events['x'] = x_undistorted
+    undistorted_events['y'] = y_undistorted
+
+    events = undistorted_events
     
     num_frames = len(frame_boundaries) + 1
     event_accumulator = [[0 for _ in range(width)] for _ in range(height)]
@@ -99,11 +140,6 @@ def create_event_tensor(h5_path, frame_boundaries, height, width):
         # Debugging: Print a sample of the event accumulator after processing the frame
         print(f"Event accumulator after frame {i}: {[row[10:] for row in event_accumulator[10:]]}")
     
-    # Remove zeros from the event accumulator
-    event_accumulator = [[value for value in row if value != 0] for row in event_accumulator if any(value != 0 for value in row)]
-    
-    max_length = max(len(row) for row in event_accumulator)
-    event_accumulator = [row + [0] * (max_length - len(row)) for row in event_accumulator]
 
     event_tensor = torch.tensor(event_accumulator, dtype=torch.int32)
 
