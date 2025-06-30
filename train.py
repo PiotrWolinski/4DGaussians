@@ -269,6 +269,7 @@ def scene_reconstruction(
                 stage=stage,
                 cam_type=scene.dataset_type,
             )
+
             image, viewspace_point_tensor, visibility_filter, radii = (
                 render_pkg["render"],
                 render_pkg["viewspace_points"],
@@ -292,6 +293,69 @@ def scene_reconstruction(
             radii_list.append(radii.unsqueeze(0))
             visibility_filter_list.append(visibility_filter.unsqueeze(0))
             viewspace_point_tensor_list.append(viewspace_point_tensor)
+            if dataset.use_event:
+                start = randint(0, len(event_map_1) -2)
+                end = start + randint(1, 2)
+
+                # Debugging: Print selected timestamps
+                print(f"[Iteration {iteration}] Selected timestamps: start={start}, end={end}")
+                viewpoint_cam.time = start
+                render_pkg_start = render(
+                viewpoint_cam,
+                gaussians,
+                pipe,
+                background,
+                stage=stage,
+                cam_type=scene.dataset_type,
+            )
+                viewpoint_cam.time = end
+                render_pkg_end = render(
+                    viewpoint_cam,
+                    gaussians,
+                    pipe,
+                    background,
+                    stage=stage,
+                    cam_type=scene.dataset_type,
+                )
+
+                image_start = render_pkg_start["render"]
+                image_end = render_pkg_end["render"]
+
+                # Debugging: Print rendered images for event loss calculation
+                print(f"[Iteration {iteration}] Rendered image at start timestamp shape: {image_start.shape}")
+                print(f"[Iteration {iteration}] Rendered image at end timestamp shape: {image_end.shape}")
+
+                event_data_1 = event_map_1[img_i].clone().squeeze()
+                event_data_2 = event_map_2[img_i].clone().squeeze()
+                
+                print(f"[Iteration {iteration}] Event map 1 shape: {event_map_1[img_i].shape}")
+                print(f"[Iteration {iteration}] Event map 2 shape: {event_map_2[img_i].shape}")
+                
+                
+                event_loss_1 = event_loss_call(
+                    image_start,
+                    image_end,
+                    event_data_1,
+                    [start, end],
+                    viewpoint_cam.image_height,
+                    viewpoint_cam.image_width,
+                    iteration,
+                    img_i,
+                ) * 0.001
+                event_loss_2 = event_loss_call(
+                    image_start,
+                    image_end,
+                    event_data_2,
+                    [start, end],
+                    viewpoint_cam.image_height,
+                    viewpoint_cam.image_width,
+                    iteration,
+                    img_i,
+                ) * 0.001
+                event_loss = event_loss_1 + event_loss_2
+            else:
+                event_loss = torch.tensor(0, dtype=torch.float64)
+            
 
         radii = torch.cat(radii_list, 0).max(dim=0).values
         visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
@@ -300,34 +364,8 @@ def scene_reconstruction(
         # Loss
         # breakpoint()
         # Calculate event loss
-        if dataset.use_event:
-            
-            event_data_1 = event_map_1[img_i].clone().squeeze()
-            event_data_2 = event_map_2[img_i].clone().squeeze()
-            
-            
-            event_loss_1 = event_loss_call(
-                image_tensor,
-                event_data_1,
-                combination,
-                viewpoint_cam.image_height,
-                viewpoint_cam.image_width,
-                iteration,
-                img_i,
-            ) * 0.001
-            event_loss_2 = event_loss_call(
-                image_tensor,
-                event_data_2,
-                combination,
-                viewpoint_cam.image_height,
-                viewpoint_cam.image_width,
-                iteration,
-                img_i,
-            ) * 0.001
-            event_loss = event_loss_1 + event_loss_2
-        else:
-            event_loss = torch.tensor(0, dtype=torch.float64)
-
+        print(f"[Iteration {iteration}] Rendered image tensor shape: {image_tensor.shape}")
+        print(f"[Iteration {iteration}] Ground truth image tensor shape: {gt_image_tensor.shape}")
 
         Ll1 = l1_loss(image_tensor, gt_image_tensor[:, :3, :, :])
 

@@ -11,8 +11,13 @@ import copy
 def render_training_image(scene, gaussians, viewpoints, render_func, pipe, background, stage, iteration, time_now, dataset_type):
     def render(gaussians, viewpoint, path, scaling, cam_type):
         # scaling_copy = gaussians._scaling
+        # Debugging: Print viewpoint and dataset type
+        print(f"[Rendering] Viewpoint: {viewpoint}, Dataset Type: {dataset_type}")
         render_pkg = render_func(viewpoint, gaussians, pipe, background, stage=stage, cam_type=cam_type)
         label1 = f"stage:{stage},iter:{iteration}"
+        # Debugging: Print rendered image and depth map shapes
+        print(f"[Rendering] Rendered image shape: {render_pkg['render'].shape}")
+        print(f"[Rendering] Depth map shape: {render_pkg['depth'].shape}")
         times =  time_now/60
         if times < 1:
             end = "min"
