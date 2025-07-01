@@ -91,62 +91,37 @@ def create_event_tensor(h5_path, frame_boundaries, height, width):
     }
 
     events = undistorted_events
+    # Discretize time into intervals
+    min_time = events['t'].min()
+    max_time = events['t'].max()
+    time_bins = np.linspace(min_time, max_time, num_intervals + 1)
+
+    event_tensor = np.zeros((num_intervals, height, width), dtype=np.int32)
+
+    for i in range(num_intervals):
+        t_start, t_end = time_bins[i], time_bins[i + 1]
+
+        # Find events within the current time interval
+        interval_mask = (events['t'] >= t_start) & (events['t'] < t_end)
+        x_interval = events['x'][interval_mask].astype(int)
+        y_interval = events['y'][interval_mask].astype(int)
+        p_interval = events['p'][interval_mask].astype(int)
+
+        # Map polarities to [-1, 1]
+        polarities = np.where(p_interval == 0, -1, 1)
+
+        # Accumulate polarities into the tensor
+        for x, y, polarity in zip(x_interval, y_interval, polarities):
+            event_tensor[i, y, x] += polarity
     
-    num_frames = len(frame_boundaries) + 1
-    event_accumulator = [[0 for _ in range(width)] for _ in range(height)]
+    event_tensor = torch.tensor(event_tensor, dtype=torch.int32)
     
-
-    all_boundaries = [0.0] + frame_boundaries
-    print ("all_boundaries:", all_boundaries)
-    for i in tqdm(range(len(all_boundaries) - 1), desc=f"Processing {os.path.basename(h5_path)}"):
-        t_start, t_end = all_boundaries[i], all_boundaries[i+1]
-
-        # Debugging: Print the time boundaries for the current frame
-        print(f"Frame {i}: t_start={t_start}, t_end={t_end}")
-
-        time_slice_indices = [idx for idx, time in enumerate(events['t']) if t_start <= time < t_end]
-        #print(f"Number of events in time slice: {len(time_slice_indices)}")
-        if not time_slice_indices:
-            continue
-
-      
-
-        time_slice_events = {key: [events[key][idx] for idx in time_slice_indices] for key in events}
-
-        x_s = list(map(int, time_slice_events['x']))  # Cast x-coordinates to int
-        y_s = list(map(int, time_slice_events['y']))  # Cast y-coordinates to int
-        p_s = list(map(int, time_slice_events['p']))  # Cast polarities to int
-        # Debugging: Print polarities
-        print(f"Polarities for frame {i}: {p_s[:10]}")
-
-        polarities = [-1 if p == 0 else 1 for p in p_s]
-        polarities = list(map(int, polarities))
-        print(f"Mapped polarities for frame {i}: {polarities[:10]}")
-
-        valid_indices = [
-            idx for idx in range(len(x_s))
-            if 0 <= x_s[idx] < width and 0 <= y_s[idx] < height
-        ]
-        x_s = [x_s[idx] for idx in valid_indices]
-        y_s = [y_s[idx] for idx in valid_indices]
-        polarities = [polarities[idx] for idx in valid_indices]
-
-        # Debugging: Print valid indices
-        #print(f"x_s valid indices: {x_s[:10]}")
-        #print(f"y_s valid indices: {y_s[:10]}")
-
-        
-        for idx in range(len(x_s)):
-            x_idx = x_s[idx]
-            y_idx = y_s[idx]
-            polarity = polarities[idx]
-            event_accumulator[y_idx][x_idx] += polarity
-
-        # Debugging: Print a sample of the event accumulator after processing the frame
-        #print(f"Event accumulator after frame {i}: {[row[10:] for row in event_accumulator[10:]]}")
+    print(f"Maximum value in the event tensor: {torch.max(event_tensor)}")
     
 
-    event_tensor = torch.tensor(event_accumulator, dtype=torch.int32)
+    #Debugging: Print a sample of the event accumulator after processing the frame
+    #print(f"Event accumulator after frame {i}: {[row[10:] for row in event_accumulator[10:]]}")
+
 
     # Debugging: Print the final event tensor shape and sample values
     print(f"Final event tensor shape: {event_tensor.shape}")
@@ -163,6 +138,9 @@ if __name__ == "__main__":
     # We get the global timeline from the master JSON file
     frame_boundaries = get_timestamps_from_json(timestamps_path)
     
+    num_intervals = len(frame_boundaries)
+    print(f"Number of time intervals: {num_intervals}")
+
     for h5_file_path, cam_id in EVENT_SOURCES:
         
         print(f"\nProcessing events for {cam_id}...")
