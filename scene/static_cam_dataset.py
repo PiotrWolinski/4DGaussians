@@ -12,7 +12,7 @@ from utils.graphics_utils import fov2focal, focal2fov
 from torchvision import transforms as T
 
 class StaticMultiCamDataset(Dataset):
-    def __init__(self, datadir, split, llffhold=8):
+    def __init__(self, datadir, split, llffhold=10):
         
         self.datadir = datadir
         self.split = split
@@ -36,7 +36,13 @@ class StaticMultiCamDataset(Dataset):
         self.transform = T.ToTensor()
         self.image_paths, self.image_poses, self.image_times = self.load_images_path()
         
+        event_cam_data_path = os.path.join(self.datadir, "transforms_event.json")
+        self.event_tensors, self.event_poses = self.load_event_cameras(event_cam_data_path)
+
+        # Get number of even frames in the given tensors
+        self.event_boundaries = [tensor.shape[0] for tensor in self.event_tensors]
     
+
     def load_images_path(self):
         image_paths = []
         image_poses = []
@@ -55,7 +61,6 @@ class StaticMultiCamDataset(Dataset):
                 print(f"Warning: File not found: {image_path}")
                 continue
 
-            
             image_paths.append(image_path)
             image_poses.append((R, T))
             image_times.append(float(idx / len(self.transforms_data["frames"])))
@@ -70,8 +75,55 @@ class StaticMultiCamDataset(Dataset):
                 image_times = [image_times[i] for i in range(len(image_times)) if i % self.llffhold == 0]
 
         print(f"Loaded {len(image_paths)} image paths.")
-        return image_paths, image_poses, image_times
+        return image_paths, image_poses, np.array(image_times)
     
+
+    def load_event_cameras(self, event_data_path: str):
+        event_cams_data = None
+        with open(event_data_path, 'r') as f:
+            event_cams_data = json.load(f)
+
+        cam_poses = {cam["id"]: np.array(cam["transform_matrix"]) for cam in event_cams_data["cameras"]}
+        parsed_poses = []
+        tensors = []
+
+        for cam_id in cam_poses.keys():
+            transform_matrix = cam_poses[cam_id]
+            R = transform_matrix[:3, :3]
+            T = transform_matrix[:3, 3]
+
+            parsed_poses.append((R, T))
+            tensors.append(torch.load(os.path.join(self.datadir, f"events_{cam_id}.pt"), map_location="cuda"))
+
+        return tensors, parsed_poses
+
+ 
+    def get_next_timestamp(self, current_timestamp: float) -> tuple[int, float] | None:
+        """Returns idx and value of the next timestamp from the dataset.
+        
+        Returns None if such timestamp does not exist (current is the last one from the dataset.)
+        """
+
+        # Discard if this is the last timestamp
+        if current_timestamp == 1.0:
+            return None
+        
+        current_idx = np.where(self.image_times == current_timestamp)
+        next_idx = current_idx[0] + 1
+
+        return next_idx, self.image_times[next_idx]
+    
+
+    def timestamp_to_event_idx(self, timestamp: float, event_boundary: int) -> int:
+        """Converts normalized camera timestamps into indices in the event tensors."""
+        event_timestamp = int(event_boundary * timestamp)
+
+        if event_timestamp >= event_boundary:
+            event_timestamp -= 1
+
+        return event_timestamp
+
+
     def get_video_cam_infos(self, datadir):
         from scene.dataset_readers import CameraInfo
         poses_arr = np.load(os.path.join(datadir, "transforms.json"))
@@ -103,13 +155,18 @@ class StaticMultiCamDataset(Dataset):
                                 image_path=image_path, image_name=image_name, width=image.shape[2], height=image.shape[1],
                                 time = time, mask=None))
         return cameras
+
+
     def __len__(self):
         return len(self.image_paths)
+
+
     def __getitem__(self, index):
         img = Image.open(self.image_paths[index])
         img = self.transform(img)
+
         return img, self.image_poses[index], self.image_times[index]
+
+
     def load_pose(self,index):
         return self.image_poses[index]
-
-        
