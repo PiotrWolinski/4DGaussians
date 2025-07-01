@@ -31,14 +31,16 @@ SOURCE_DATA_DIR = 'data/final_dataset/falling_bag'
 
 # A list of tuples: (path_to_h5_file, corresponding_cam_id_string)
 EVENT_SOURCES = [
-    ('data/h5_data/1634_paper_bag_data.h5', 'cam15'),
-    #('data/h5_data/1642_paper_bag_data.h5', 'cam16'),
+    ('/home/pwolinski/projects/4DGaussians/data/multipleview/falling_bag_undist_events/1634_paper_bag_data.h5', 'cam15'),
+    ('/home/pwolinski/projects/4DGaussians/data/multipleview/falling_bag_undist_events/1642_paper_bag_data.h5', 'cam16'),
 ]
-OUTPUT_DIR = 'data/temp_pt'
+OUTPUT_DIR = '/home/pwolinski/projects/4DGaussians/data/multipleview/falling_bag_undist_events/'
 
-TIMESTAMP_PATH = 'data/h5_data/'
+TIMESTAMP_PATH = '/home/pwolinski/projects/4DGaussians/data/multipleview/falling_bag_undist_events/'
 
-H, W = 480, 752 # Image resolution
+H, W = 480, 640 # Image resolution
+
+TIME_RESOLUTION = 2_000 # Set event aggregation window to 2 ms
 
 
 def get_timestamps_from_json(txt_path):
@@ -73,7 +75,7 @@ def create_event_tensor(h5_path, frame_boundaries, height, width):
     K = cam_params["K"]
     D = cam_params["D"]
 
-    mapx, mapy = cv2.initUndistortRectifyMap(K, D, None, K, (width, height), cv2.CV_32FC1)
+    mapx, mapy = cv2.initUndistortRectifyMap(K, D, None, None, (width, height), cv2.CV_32FC1)
 
     x_int = events['x'].astype(int)
     y_int = events['y'].astype(int)
@@ -94,12 +96,12 @@ def create_event_tensor(h5_path, frame_boundaries, height, width):
     # Discretize time into intervals
     min_time = events['t'].min()
     max_time = events['t'].max()
-    time_bins = np.linspace(min_time, max_time, num_intervals + 1)
+    time_bins = np.arange(min_time, max_time, TIME_RESOLUTION)
 
-    event_tensor = np.zeros((num_intervals, height, width), dtype=np.int32)
+    event_tensor = np.zeros((len(time_bins), height, width), dtype=np.int8)
 
-    for i in range(num_intervals):
-        t_start, t_end = time_bins[i], time_bins[i + 1]
+    for start_idx in range(len(event_tensor)-1):
+        t_start, t_end = time_bins[start_idx], time_bins[start_idx + 1]
 
         # Find events within the current time interval
         interval_mask = (events['t'] >= t_start) & (events['t'] < t_end)
@@ -112,9 +114,9 @@ def create_event_tensor(h5_path, frame_boundaries, height, width):
 
         # Accumulate polarities into the tensor
         for x, y, polarity in zip(x_interval, y_interval, polarities):
-            event_tensor[i, y, x] += polarity
+            event_tensor[start_idx, y, x] += polarity
     
-    event_tensor = torch.tensor(event_tensor, dtype=torch.int32)
+    event_tensor = torch.tensor(event_tensor, dtype=torch.int8)
     
     print(f"Maximum value in the event tensor: {torch.max(event_tensor)}")
     
