@@ -6,7 +6,8 @@ from pathlib import Path
 
 # Add project root to path to import colmap_loader
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from scene.colmap_loader import read_extrinsics_binary, read_intrinsics_binary, qvec2rotmat, read_intrinsics_text
+from scene.colmap_loader import read_extrinsics_binary, read_intrinsics_binary, qvec2rotmat, read_intrinsics_text, read_extrinsics_text
+
 
 def c2w_from_colmap(R, t):
     w2c = np.eye(4)
@@ -16,6 +17,7 @@ def c2w_from_colmap(R, t):
     c2w[:3, 1:3] *= -1  # OpenCV to OpenGL coordinate system conversion
     return c2w
 
+
 def main(colmap_dir, source_dir, output_dir, total_cams):
     print(f"Reading COLMAP data from: {colmap_dir}")
     images_bin = read_extrinsics_binary(os.path.join(colmap_dir, "images.bin"))
@@ -24,6 +26,24 @@ def main(colmap_dir, source_dir, output_dir, total_cams):
     cam_intr = list(cameras_bin.values())[0]
     fl_x, fl_y, cx, cy, *_ = cam_intr.params
     w, h = cam_intr.width, cam_intr.height
+    
+    avg_fx = 0
+    avg_fy = 0
+
+    avg_cx = 0
+    avg_cy = 0
+
+    for cam in cameras_bin.values():
+        avg_fx += cam.params[0]
+        avg_fy += cam.params[1]
+        avg_cx += cam.params[2]
+        avg_cy += cam.params[3]
+
+    avg_fx /= len(cameras_bin)
+    avg_fy /= len(cameras_bin)
+    avg_cx /= len(cameras_bin)
+    avg_cy /= len(cameras_bin)
+
 
     cam_poses = {}
     for img_data in images_bin.values():
@@ -65,17 +85,61 @@ def main(colmap_dir, source_dir, output_dir, total_cams):
             frames_combined.append(frame_data)
 
     base_json = {
-        "fl_x": fl_x, "fl_y": fl_y, "cx": cx, "cy": cy, "w": w, "h": h,
-        "camera_angle_x": np.arctan(w / (2 * fl_x)) * 2,
-        "camera_angle_y": np.arctan(h / (2 * fl_y)) * 2,
+        "fl_x": avg_fx, "fl_y": avg_fy, "cx": avg_cx, "cy": avg_cy, "w": w, "h": h
     }
 
-    with open(os.path.join(output_dir, "transforms_train.json"), "w") as f:
-        json.dump({**base_json, "frames": train_frames}, f, indent=4)
-    with open(os.path.join(output_dir, "transforms_test.json"), "w") as f:
-        json.dump({**base_json, "frames": test_frames}, f, indent=4)
     with open(os.path.join(output_dir, "transforms.json"), "w") as f:
         json.dump({**base_json, "cameras": cam_data, "frames": frames_combined}, f, indent=4)
+
+    # Read event camera data
+    event_cameras_extrinsics = read_extrinsics_text(os.path.join(colmap_dir, "event_cameras_extrinsics.txt"))
+    event_cameras_intrinsics = read_intrinsics_text(os.path.join(colmap_dir, "event_cameras_intrinsics.txt"))
+
+    avg_fx = 0
+    avg_fy = 0
+
+    avg_cx = 0
+    avg_cy = 0
+
+    for cam in event_cameras_intrinsics.values():
+        avg_fx += cam.params[0]
+        avg_fy += cam.params[1]
+        avg_cx += cam.params[2]
+        avg_cy += cam.params[3]
+
+    avg_fx /= len(event_cameras_intrinsics)
+    avg_fy /= len(event_cameras_intrinsics)
+    avg_cx /= len(event_cameras_intrinsics)
+    avg_cy /= len(event_cameras_intrinsics)
+
+    event_intr = list(event_cameras_intrinsics.values())[0]
+    w, h = event_intr.width, event_intr.height
+
+    event_base_json = {
+        "fl_x": avg_fx, "fl_y": avg_fy, "cx": avg_cx, "cy": avg_cy, "w": w, "h": h
+    }
+
+    event_cam_poses = {}
+    for img_data in event_cameras_extrinsics.values():
+        cam_id_str = os.path.splitext(img_data.name)[0].split('_')[2]
+        R = qvec2rotmat(img_data.qvec)
+        t = img_data.tvec
+        c2w = c2w_from_colmap(R, t)
+        event_cam_poses[cam_id_str] = c2w.tolist()
+
+
+    event_cam_data = []
+
+    for cam_id in event_cam_poses.keys():
+        event_cam_data.append({
+            "id": cam_id,
+            "transform_matrix": event_cam_poses[cam_id]
+        })
+    
+
+    with open(os.path.join(output_dir, "transforms_event.json"), "w") as f:
+        json.dump({**event_base_json, "cameras": event_cam_data}, f, indent=4)
+
 
 if __name__ == "__main__":
     main(sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]))
