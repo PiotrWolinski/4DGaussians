@@ -253,6 +253,7 @@ def scene_reconstruction(
         # print(len(viewpoint_cams))
         # breakpoint()
         # Render
+        
         if (iteration - 1) == debug_from:
             pipe.debug = True
         images = []
@@ -284,21 +285,27 @@ def scene_reconstruction(
 
             # Determine image index
             img_i = viewpoint_cam.image_name
-            if scene.dataset_type == "synthetic":
-                img_i = int(img_i.split('_')[1]) // 2
-            else:
-                img_i = int(img_i) // 5
+            print(f"img_i: {img_i}, temporal dimension size: {event_map_1.size(0)}")
 
+            img_i = int(img_i) % event_map_1.size(0)
+
+            print(f"Mapped img_i: {img_i}, temporal dimension size: {event_map_1.size(0)}")
+            
             gt_images.append(gt_image.unsqueeze(0))
             radii_list.append(radii.unsqueeze(0))
             visibility_filter_list.append(visibility_filter.unsqueeze(0))
             viewspace_point_tensor_list.append(viewspace_point_tensor)
             if dataset.use_event:
-                start = randint(0, len(event_map_1) -2)
-                end = start + randint(1, 2)
+                start = randint(0, event_map_1.size(0) - 2)
+                end = start + randint(1, 3)
+
+                img_i = start % event_map_1.size(0)
+
+                print(f"img_i: {img_i}, temporal dimension size: {event_map_1.size(0)}")
+                print(f"Mapped img_i: {img_i}, temporal dimension size: {event_map_1.size(0)}")
 
                 # Debugging: Print selected timestamps
-                print(f"[Iteration {iteration}] Selected timestamps: start={start}, end={end}")
+                #print(f"[Iteration {iteration}] Selected timestamps: start={start}, end={end}")
                 viewpoint_cam.time = start
                 render_pkg_start = render(
                 viewpoint_cam,
@@ -320,16 +327,18 @@ def scene_reconstruction(
 
                 image_start = render_pkg_start["render"]
                 image_end = render_pkg_end["render"]
-
-                # Debugging: Print rendered images for event loss calculation
-                print(f"[Iteration {iteration}] Rendered image at start timestamp shape: {image_start.shape}")
-                print(f"[Iteration {iteration}] Rendered image at end timestamp shape: {image_end.shape}")
-
-                event_data_1 = event_map_1[img_i].clone().squeeze()
-                event_data_2 = event_map_2[img_i].clone().squeeze()
                 
-                print(f"[Iteration {iteration}] Event map 1 shape: {event_map_1[img_i].shape}")
-                print(f"[Iteration {iteration}] Event map 2 shape: {event_map_2[img_i].shape}")
+                # Debugging: Print rendered images for event loss calculation
+                #print(f"[Iteration {iteration}] Rendered image at start timestamp shape: {image_start.shape}")
+                #print(f"[Iteration {iteration}] Rendered image at end timestamp shape: {image_end.shape}")
+
+                event_data_1 = event_map_1.clone()
+                event_data_2 = event_map_2.clone()
+
+                print(f"Shape of event_data before event_loss_call: {event_data_1.shape}")
+                print(f"Shape of event_data before event_loss_call: {event_data_2.shape}")
+                #print(f"[Iteration {iteration}] Event map 1 shape: {event_map_1[img_i].shape}")
+                #print(f"[Iteration {iteration}] Event map 2 shape: {event_map_2[img_i].shape}")
                 
                 
                 event_loss_1 = event_loss_call(
@@ -364,8 +373,8 @@ def scene_reconstruction(
         # Loss
         # breakpoint()
         # Calculate event loss
-        print(f"[Iteration {iteration}] Rendered image tensor shape: {image_tensor.shape}")
-        print(f"[Iteration {iteration}] Ground truth image tensor shape: {gt_image_tensor.shape}")
+        #print(f"[Iteration {iteration}] Rendered image tensor shape: {image_tensor.shape}")
+        #print(f"[Iteration {iteration}] Ground truth image tensor shape: {gt_image_tensor.shape}")
 
         Ll1 = l1_loss(image_tensor, gt_image_tensor[:, :3, :, :])
 

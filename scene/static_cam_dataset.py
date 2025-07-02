@@ -26,6 +26,14 @@ class StaticMultiCamDataset(Dataset):
         with open(json_path, 'r') as f:
             self.transforms_data = json.load(f)
 
+        # Load transforms_events.json
+        event_json_path = os.path.join(self.datadir, "transforms_events.json")
+        if not os.path.exists(event_json_path):
+            raise FileNotFoundError(f"Could not find transforms_events.json in {datadir}")
+
+        with open(event_json_path, 'r') as f:
+            self.event_transforms_data = json.load(f)
+
         # Extract camera intrinsics
         self.focal = [self.transforms_data["fl_x"], self.transforms_data["fl_y"]]
         height = self.transforms_data["h"]
@@ -35,12 +43,6 @@ class StaticMultiCamDataset(Dataset):
 
         self.transform = T.ToTensor()
         self.image_paths, self.image_poses, self.image_times = self.load_images_path()
-        
-        event_cam_data_path = os.path.join(self.datadir, "transforms_event.json")
-        self.event_tensors, self.event_poses = self.load_event_cameras(event_cam_data_path)
-
-        # Get number of even frames in the given tensors
-        self.event_boundaries = [tensor.shape[0] for tensor in self.event_tensors]
     
 
     def load_images_path(self):
@@ -49,10 +51,20 @@ class StaticMultiCamDataset(Dataset):
         image_times = []
         camera_extrinsics = {camera["id"]: np.array(camera["transform_matrix"]) for camera in self.transforms_data["cameras"]}
 
+        event_camera_extrinsics = {camera["id"]: np.array(camera["transform_matrix"]) for camera in self.event_transforms_data["cameras"]}
+
         for idx, frame in enumerate(self.transforms_data["frames"]):
             cam_id = frame["cam_id"]
 
-            transform_matrix = camera_extrinsics[cam_id]
+            if cam_id in event_camera_extrinsics:
+                transform_matrix = event_camera_extrinsics[cam_id]
+            elif cam_id in camera_extrinsics:
+                transform_matrix = camera_extrinsics[cam_id]
+            else:
+                print(f"Warning: Camera ID {cam_id} not found in transforms.json or transforms_events.json.")
+                continue
+
+            
             R = transform_matrix[:3, :3]
             T = transform_matrix[:3, 3]
 

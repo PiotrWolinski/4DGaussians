@@ -31,29 +31,28 @@ SOURCE_DATA_DIR = 'data/final_dataset/falling_bag'
 
 # A list of tuples: (path_to_h5_file, corresponding_cam_id_string)
 EVENT_SOURCES = [
-    ('/home/pwolinski/projects/4DGaussians/data/multipleview/falling_bag_undist_events/1634_paper_bag_data.h5', 'cam15'),
-    ('/home/pwolinski/projects/4DGaussians/data/multipleview/falling_bag_undist_events/1642_paper_bag_data.h5', 'cam16'),
+    ('/home/debmalya/Documents/4DGaussians_events/4DGaussians/data/h5_data/1642_paper_bag_data.h5', 'cam16'),
+    #('/home/debmalya/Documents/4DGaussians_events/4DGaussians/data/h5_data/1642_paper_bag_data.h5', 'cam16'),
 ]
-OUTPUT_DIR = '/home/pwolinski/projects/4DGaussians/data/multipleview/falling_bag_undist_events/'
-
-TIMESTAMP_PATH = '/home/pwolinski/projects/4DGaussians/data/multipleview/falling_bag_undist_events/'
+OUTPUT_DIR = '/home/debmalya/Documents/4DGaussians_events/4DGaussians/data/temp_pt'
 
 H, W = 480, 640 # Image resolution
+TIMESTAMP_PATH = '/home/debmalya/Documents/4DGaussians_events/4DGaussians/data/h5_data/1642_time_paper_bag.txt'
 
 TIME_RESOLUTION = 2_000 # Set event aggregation window to 2 ms
+H, W = 480, 640 # Image resolution
 
 
-def get_timestamps_from_json(txt_path):
-    """Reads the 'time' field for all frames from the transforms.json file."""
+def get_timestamps_from_txt(txt_path):
+    """Reads the start and end timestamps from the timestamps.txt file."""
     with open(txt_path, 'r') as f:
         timestamps = [int(line.strip()) for line in f.readlines()]
-    timestamps = np.array(timestamps)
-    return timestamps
+    return timestamps[0], timestamps[-1]  # Return start and end timestamps
     
     
 
 
-def create_event_tensor(h5_path, frame_boundaries, height, width):
+def create_event_tensor(h5_path, height, width):
 
     with h5py.File(h5_path, 'r') as f:
         t = np.array(f['t'][:], dtype=int)  # Convert timestamps to NumPy array
@@ -132,21 +131,13 @@ def create_event_tensor(h5_path, frame_boundaries, height, width):
 
 
 if __name__ == "__main__":
-    timestamps_path = os.path.join(TIMESTAMP_PATH, '1634_time_paper_bag.txt')
-    if not os.path.exists(timestamps_path):
-        print(f"FATAL: timestamps.txt not found in {EVENT_SOURCES}. Please run prepare_poses.sh first.")
-        sys.exit(1)
+    timestamps = get_timestamps_from_txt(TIMESTAMP_PATH)
 
-    # We get the global timeline from the master JSON file
-    frame_boundaries = get_timestamps_from_json(timestamps_path)
-    
-    num_intervals = len(frame_boundaries)
-    print(f"Number of time intervals: {num_intervals}")
 
     for h5_file_path, cam_id in EVENT_SOURCES:
         
         print(f"\nProcessing events for {cam_id}...")
-        event_tensor = create_event_tensor(h5_file_path, frame_boundaries, H, W)
+        event_tensor = create_event_tensor(h5_file_path, H, W)
 
 
         output_filename = f"events_{cam_id}.pt"

@@ -25,39 +25,29 @@ def event_loss_call(image_start, image_end, event_data, timestamps, resolution_h
     '''
 
     start, end = timestamps
-    # Ensure event_data is 1D
-    if event_data.dim() != 1:
-        raise ValueError(f"event_data must be a 1D tensor, but got shape {event_data.shape}")
-    loss = []
-    
-     # Ensure timestamps are close together
-    if abs(end - start) > 2:
-        print(f"Skipping iteration {iteration} due to large timestamp difference: start={start}, end={end}")
-        return torch.tensor(0, dtype=torch.float64)
+    temporal_size = event_data.size(0) 
+    # Ensure start and end indices are within bounds
+    if start < 0 or end > temporal_size:
+        raise IndexError(f"Timestamps out of bounds: start={start}, end={end}, size={event_data.size(0)}")
 
-    # Ensure timestamps are within bounds
-    if start >= event_data.size(0) or end > event_data.size(0):
-        print(f"Skipping iteration {iteration} due to out-of-bounds indices: start={start}, end={end}")
-        return torch.tensor(0, dtype=torch.float64)
-        
     # Accumulate events between timestamps
     event_clone = event_data.clone()
     accumulated_events = event_clone[start:end].sum()
-    print(f"[Iteration {iteration}] Accumulated events: {accumulated_events}")    
+    #print(f"[Iteration {iteration}] Accumulated events: {accumulated_events}")    
 
     # Calculate difference between rendered images
     image_diff = torch.abs(image_end - image_start)
-    print(f"[Iteration {iteration}] Image difference shape: {image_diff.shape}")
+    #print(f"[Iteration {iteration}] Image difference shape: {image_diff.shape}")
         
         # Calculate thresholds
     start_value = lin_log(event_data[start] * 255)
     end_value = lin_log(event_data[end - 1] * 255)
-    print(f"[Iteration {iteration}] lin_log(start_value): {start_value}, lin_log(end_value): {end_value}")
+    #print(f"[Iteration {iteration}] lin_log(start_value): {start_value}, lin_log(end_value): {end_value}")
         
 
     thres_pos = (end_value - start_value) / 0.3
     thres_neg = (end_value - start_value) / 0.2
-    print(f"[Iteration {iteration}] thres_pos: {thres_pos}, thres_neg: {thres_neg}")
+    #print(f"[Iteration {iteration}] thres_pos: {thres_pos}, thres_neg: {thres_neg}")
         
             
         #for j in range(start + 1, end):
@@ -71,7 +61,7 @@ def event_loss_call(image_start, image_end, event_data, timestamps, resolution_h
     loss_neg = torch.mean(((thres_neg * neg) - ((accumulated_events - 0.5) * neg)) ** 2)
         
     event_loss = loss_pos + loss_neg
-    print(f"[Iteration {iteration}] Event Loss: {event_loss}")
+    #print(f"[Iteration {iteration}] Event Loss: {event_loss}")
 
     
     return event_loss

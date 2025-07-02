@@ -21,6 +21,9 @@ def normalize_aabb(pts, aabb):
 def grid_sample_wrapper(grid: torch.Tensor, coords: torch.Tensor, align_corners: bool = True) -> torch.Tensor:
     grid_dim = coords.shape[-1]
 
+    grid = grid.float()
+    coords = coords.float()
+
     if grid.dim() == grid_dim + 1:
         # no batch dimension present, need to add it
         grid = grid.unsqueeze(0)
