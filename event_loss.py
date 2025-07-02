@@ -31,7 +31,7 @@ def event_loss_call(image_start, image_end, event_data, timestamps, resolution_h
         raise IndexError(f"Timestamps out of bounds: start={start}, end={end}, size={event_data.size(0)}")
 
     # Accumulate events between timestamps
-    event_clone = event_data.clone()
+    event_clone = event_data
     accumulated_events = event_clone[start:end].sum()
     #print(f"[Iteration {iteration}] Accumulated events: {accumulated_events}")    
 
@@ -39,7 +39,7 @@ def event_loss_call(image_start, image_end, event_data, timestamps, resolution_h
     image_diff = torch.abs(image_end - image_start)
     #print(f"[Iteration {iteration}] Image difference shape: {image_diff.shape}")
         
-        # Calculate thresholds
+    # Calculate thresholds
     start_value = lin_log(event_data[start] * 255)
     end_value = lin_log(event_data[end - 1] * 255)
     #print(f"[Iteration {iteration}] lin_log(start_value): {start_value}, lin_log(end_value): {end_value}")

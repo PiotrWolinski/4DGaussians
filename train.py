@@ -31,6 +31,7 @@ from utils.scene_utils import render_training_image
 from time import time
 import copy
 from event_loss import event_loss_call
+import gc
 
 to8b = lambda x: (255 * np.clip(x.cpu().numpy(), 0, 1)).astype(np.uint8)
 
@@ -87,20 +88,6 @@ def scene_reconstruction(
     first_iter += 1
 
     
-    if dataset.use_event:
-        print("---------------event_data_loading----------------")
-        event_map_1 = torch.load(os.path.join(dataset.source_path, "events_cam15.pt"))
-        event_map_2 = torch.load(os.path.join(dataset.source_path, "events_cam16.pt"))
-        print("Event camera 1 size: " + str(event_map_1.size()))
-        print("Event camera 2 size: " + str(event_map_2.size()))
-        event_map_1 = event_map_1.to(device="cuda")
-        event_map_2 = event_map_2.to(device="cuda")
-        combination = []
-        for m in range(4):
-            for n in range(m + 1, 5):
-                combination.append([m, n])
-
-
     # lpips_model = lpips.LPIPS(net="alex").cuda()
     video_cams = scene.getVideoCameras()
     test_cams = scene.getTestCameras()
@@ -214,7 +201,6 @@ def scene_reconstruction(
             gaussians.oneupSHdegree()
 
         # Pick a random Camera
-
         if not viewpoint_stack:
             viewpoint_stack = list(scene.getTrainCameras())  
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack) - 1))
@@ -283,87 +269,64 @@ def scene_reconstruction(
             else:
                 gt_image = viewpoint_cam["image"].cuda()
 
-            # Determine image index
-            img_i = viewpoint_cam.image_name
-            print(f"img_i: {img_i}, temporal dimension size: {event_map_1.size(0)}")
-
-            img_i = int(img_i) % event_map_1.size(0)
-
-            print(f"Mapped img_i: {img_i}, temporal dimension size: {event_map_1.size(0)}")
             
             gt_images.append(gt_image.unsqueeze(0))
             radii_list.append(radii.unsqueeze(0))
             visibility_filter_list.append(visibility_filter.unsqueeze(0))
             viewspace_point_tensor_list.append(viewspace_point_tensor)
+            
+            event_loss = torch.tensor(0, dtype=torch.float64)
+
             if dataset.use_event:
-                start = randint(0, event_map_1.size(0) - 2)
-                end = start + randint(1, 3)
+                # Pick random event camera
+                event_tensor_id = np.random.randint(0,2)
+                event_tensor = train_cams.dataset.event_tensors[event_tensor_id]
+                event_boundaries = train_cams.dataset.event_boundaries[event_tensor_id]
 
-                img_i = start % event_map_1.size(0)
+                # Find next timestamp of the 
+                next_id = train_cams.dataset.get_next_timestamp_id(viewpoint_cam.time)
 
-                print(f"img_i: {img_i}, temporal dimension size: {event_map_1.size(0)}")
-                print(f"Mapped img_i: {img_i}, temporal dimension size: {event_map_1.size(0)}")
+                if next_id is not None:
+                    next_timestamp_for_viewpoint_cam = train_cams.dataset.possible_times[next_id-1]
+                    event_cam_perspective_1 = train_cams.dataset.get_event_camera(event_tensor_id, viewpoint_cam.time)
+                    event_cam_perspective_2 = train_cams.dataset.get_event_camera(event_tensor_id, next_timestamp_for_viewpoint_cam)
 
-                # Debugging: Print selected timestamps
-                #print(f"[Iteration {iteration}] Selected timestamps: start={start}, end={end}")
-                viewpoint_cam.time = start
-                render_pkg_start = render(
-                viewpoint_cam,
-                gaussians,
-                pipe,
-                background,
-                stage=stage,
-                cam_type=scene.dataset_type,
-            )
-                viewpoint_cam.time = end
-                render_pkg_end = render(
-                    viewpoint_cam,
+                    event_time_start = train_cams.dataset.timestamp_to_event_idx(viewpoint_cam.time, event_boundaries)
+                    event_time_end = train_cams.dataset.timestamp_to_event_idx(next_timestamp_for_viewpoint_cam, event_boundaries)
+
+                    render_1 = render(
+                        event_cam_perspective_1,
+                        gaussians,
+                        pipe,
+                        background,
+                        stage=stage,
+                        cam_type=scene.dataset_type,
+                    )["render"]
+                    render_2 = render(
+                    event_cam_perspective_2,
                     gaussians,
                     pipe,
                     background,
                     stage=stage,
                     cam_type=scene.dataset_type,
-                )
+                    )["render"]
+                    
+                    event_loss = event_loss_call(
+                        render_1,
+                        render_2,
+                        event_tensor,
+                        [event_time_start, event_time_end],
+                        viewpoint_cam.image_height,
+                        viewpoint_cam.image_width,
+                        iteration,
+                        None,
+                    ) * 0.001
 
-                image_start = render_pkg_start["render"]
-                image_end = render_pkg_end["render"]
-                
-                # Debugging: Print rendered images for event loss calculation
-                #print(f"[Iteration {iteration}] Rendered image at start timestamp shape: {image_start.shape}")
-                #print(f"[Iteration {iteration}] Rendered image at end timestamp shape: {image_end.shape}")
+                    # Can be toggled if there are issues with memory
+                    # torch.cuda.empty_cache()
+                    # gc.collect()
 
-                event_data_1 = event_map_1.clone()
-                event_data_2 = event_map_2.clone()
-
-                print(f"Shape of event_data before event_loss_call: {event_data_1.shape}")
-                print(f"Shape of event_data before event_loss_call: {event_data_2.shape}")
-                #print(f"[Iteration {iteration}] Event map 1 shape: {event_map_1[img_i].shape}")
-                #print(f"[Iteration {iteration}] Event map 2 shape: {event_map_2[img_i].shape}")
                 
-                
-                event_loss_1 = event_loss_call(
-                    image_start,
-                    image_end,
-                    event_data_1,
-                    [start, end],
-                    viewpoint_cam.image_height,
-                    viewpoint_cam.image_width,
-                    iteration,
-                    img_i,
-                ) * 0.001
-                event_loss_2 = event_loss_call(
-                    image_start,
-                    image_end,
-                    event_data_2,
-                    [start, end],
-                    viewpoint_cam.image_height,
-                    viewpoint_cam.image_width,
-                    iteration,
-                    img_i,
-                ) * 0.001
-                event_loss = event_loss_1 + event_loss_2
-            else:
-                event_loss = torch.tensor(0, dtype=torch.float64)
             
 
         radii = torch.cat(radii_list, 0).max(dim=0).values
@@ -373,8 +336,8 @@ def scene_reconstruction(
         # Loss
         # breakpoint()
         # Calculate event loss
-        #print(f"[Iteration {iteration}] Rendered image tensor shape: {image_tensor.shape}")
-        #print(f"[Iteration {iteration}] Ground truth image tensor shape: {gt_image_tensor.shape}")
+        # # print(f"[Iteration {iteration}] Rendered image tensor shape: {image_tensor.shape}")
+        # # print(f"[Iteration {iteration}] Ground truth image tensor shape: {gt_image_tensor.shape}")
 
         Ll1 = l1_loss(image_tensor, gt_image_tensor[:, :3, :, :])
 
