@@ -651,7 +651,7 @@ def readStaticMultiCamInfo(path, llffhold=8):
         print("Warning: points3D.ply not found.")
 
     train_cam_infos = format_infos(train_dataset, "train")
-    #test_cam_infos = format_infos(test_dataset, "test")
+    test_cam_infos = format_infos(test_dataset, "test")
     #video_cam_infos = test_cam_infos
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
@@ -659,7 +659,7 @@ def readStaticMultiCamInfo(path, llffhold=8):
     scene_info = SceneInfo(point_cloud=pcd,
                            train_cameras=train_dataset,
                            test_cameras=test_dataset,
-                           video_cameras=test_dataset,
+                           video_cameras=test_dataset.video_cam_infos,
                            maxtime=0,
                            nerf_normalization=nerf_normalization,
                            ply_path=ply_path)

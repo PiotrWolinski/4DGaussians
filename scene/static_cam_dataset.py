@@ -56,6 +56,9 @@ class StaticMultiCamDataset(Dataset):
 
         # Get number of even frames in the given tensors
         self.event_boundaries = [tensor.shape[0] for tensor in self.event_tensors]
+
+        if self.split == "test":
+            self.video_cam_infos = self.get_video_cam_infos(datadir)
     
 
     def load_images_path(self):
@@ -63,6 +66,10 @@ class StaticMultiCamDataset(Dataset):
         image_poses = []
         image_times = []
         camera_extrinsics = {camera["id"]: np.array(camera["transform_matrix"]) for camera in self.transforms_data["cameras"]}
+
+        out_paths = []
+        out_poses = []
+        out_times = []
 
         # TODO: This is an assumption that all the cameras hold the same number of frames
         # In general this should be true
@@ -97,17 +104,26 @@ class StaticMultiCamDataset(Dataset):
 
             prev_cam_id = cam_id
 
-        if self.split == "train":
-                image_paths = [image_paths[i] for i in range(len(image_paths)) if i % self.llffhold != 0]
-                image_poses = [image_poses[i] for i in range(len(image_poses)) if i % self.llffhold != 0]
-                image_times = [image_times[i] for i in range(len(image_times)) if i % self.llffhold != 0]
-        elif self.split == "test":
-                image_paths = [image_paths[i] for i in range(len(image_paths)) if i % self.llffhold == 0]
-                image_poses = [image_poses[i] for i in range(len(image_poses)) if i % self.llffhold == 0]
-                image_times = [image_times[i] for i in range(len(image_times)) if i % self.llffhold == 0]
+            image_range = range(frames_count)
+
+            if self.split == "test":
+                image_range = [image_range[0], image_range[int(frames_count / 3)], image_range[int(frames_count * 2 / 3)]]
+
+        for cam_id in camera_extrinsics:
+
+            transform_matrix = camera_extrinsics[cam_id]
+            R = transform_matrix[:3, :3]
+            T = transform_matrix[:3, 3]
+            tmp_paths = [os.path.join(self.datadir, frame["file_path"]) for frame in self.transforms_data["frames"] if frame["cam_id"] == cam_id]
+            tmp_poses = [(R, T) for frame in self.transforms_data["frames"] if frame["cam_id"] == cam_id]
+            tmp_times = [frame["time"] for frame in self.transforms_data["frames"] if frame["cam_id"] == cam_id]
+            for i in image_range:
+                out_paths.append(tmp_paths[i])
+                out_poses.append(tmp_poses[i])
+                out_times.append(tmp_times[i])
 
         print(f"Loaded {len(image_paths)} image paths.")
-        return image_paths, image_poses, np.array(image_times)
+        return out_paths, out_poses, np.array(out_times)
     
 
     def load_event_cameras(self, event_data_path: str):
@@ -133,11 +149,11 @@ class StaticMultiCamDataset(Dataset):
         height = self.event_transforms["h"]
         width = self.event_transforms["w"]
         focal = [self.event_transforms["fl_x"], self.event_transforms["fl_y"]]
-        image, _, _ = self[index]
+        image = torch.zeros((1, height, width))
         w2c = self.event_poses[index]
         R,T = w2c
         FovX = focal2fov(focal[0], height)
-        FovY = focal2fov(focal[0], width)
+        FovY = focal2fov(focal[1], width)
     
         # Image is not important there so just take "noise" from the dataset
         return Camera(colmap_id=index,R=R,T=T,FoVx=FovX,FoVy=FovY,image=image,gt_alpha_mask=None,
@@ -145,7 +161,7 @@ class StaticMultiCamDataset(Dataset):
                               mask=None)
 
  
-    def get_next_timestamp_id(self, current_timestamp: float) -> int | None:
+    def get_next_timestamp_id(self, current_timestamp: float, step: int=1) -> int | None:
         """Returns idx of the next timestamp from the dataset for the given camera.
         
         Returns None if such timestamp does not exist (current is the last one from the dataset.)
@@ -157,7 +173,10 @@ class StaticMultiCamDataset(Dataset):
         
         current_idx = np.ceil(current_timestamp * self.sequence_length)
 
-        return int(current_idx + 1)
+        if int(current_idx + step) >= self.sequence_length:
+            return None
+
+        return int(current_idx + step)
         
 
     def timestamp_to_event_idx(self, timestamp: float, event_boundary: int) -> int:
@@ -172,7 +191,7 @@ class StaticMultiCamDataset(Dataset):
 
     def get_video_cam_infos(self, datadir):
         from scene.dataset_readers import CameraInfo
-        poses_arr = np.load(os.path.join(datadir, "transforms.json"))
+        poses_arr = np.load(os.path.join(datadir, "_poses_bounds_multipleview.npy"))
         poses = poses_arr[:, :-2].reshape([-1, 3, 5])  # (N_cams, 3, 5)
         near_fars = poses_arr[:, -2:]
         poses = np.concatenate([poses[..., 1:2], -poses[..., :1], poses[..., 2:4]], -1)

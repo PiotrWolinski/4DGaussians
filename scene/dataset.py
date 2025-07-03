@@ -16,6 +16,7 @@ class FourDGSdataset(Dataset):
         self.dataset = dataset
         self.args = args
         self.dataset_type=dataset_type
+
     def __getitem__(self, index):
         # breakpoint()
 
@@ -39,8 +40,11 @@ class FourDGSdataset(Dataset):
             return Camera(colmap_id=index,R=R,T=T,FoVx=FovX,FoVy=FovY,image=image,gt_alpha_mask=None,
                               image_name=f"{index}",uid=index,data_device=torch.device("cuda"),time=time,
                               mask=mask)
+        elif self.dataset_type == "Static_Multicam":
+            return self.dataset[index]
         else:
             return self.dataset[index]
+
     def __len__(self):
         
         return len(self.dataset)
