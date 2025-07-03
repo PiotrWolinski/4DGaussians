@@ -279,55 +279,57 @@ def scene_reconstruction(
 
             if dataset.use_event:
                 # Pick random event camera
-                event_tensor_id = np.random.randint(0,2)
-                event_tensor = train_cams.dataset.event_tensors[event_tensor_id]
-                event_boundaries = train_cams.dataset.event_boundaries[event_tensor_id]
+                event_tensor_1 = train_cams.dataset.event_tensors[0]
+                event_boundaries_1 = train_cams.dataset.event_boundaries[0]
+                event_tensor_2 = train_cams.dataset.event_tensors[1]
+                event_boundaries_2 = train_cams.dataset.event_boundaries[1]
 
                 # Find next timestamp of the 
                 next_id = train_cams.dataset.get_next_timestamp_id(viewpoint_cam.time)
 
                 if next_id is not None:
                     next_timestamp_for_viewpoint_cam = train_cams.dataset.possible_times[next_id-1]
-                    event_cam_perspective_1 = train_cams.dataset.get_event_camera(event_tensor_id, viewpoint_cam.time)
-                    event_cam_perspective_2 = train_cams.dataset.get_event_camera(event_tensor_id, next_timestamp_for_viewpoint_cam)
 
-                    event_time_start = train_cams.dataset.timestamp_to_event_idx(viewpoint_cam.time, event_boundaries)
-                    event_time_end = train_cams.dataset.timestamp_to_event_idx(next_timestamp_for_viewpoint_cam, event_boundaries)
+                    total_event_loss = torch.tensor(0, dtype=torch.float64)
 
-                    render_1 = render(
-                        event_cam_perspective_1,
-                        gaussians,
-                        pipe,
-                        background,
-                        stage=stage,
-                        cam_type=scene.dataset_type,
-                    )["render"]
-                    render_2 = render(
-                    event_cam_perspective_2,
-                    gaussians,
-                    pipe,
-                    background,
-                    stage=stage,
-                    cam_type=scene.dataset_type,
-                    )["render"]
+                    for idx, (ev_tensor, ev_bound) in enumerate([(event_tensor_1, event_boundaries_1), (event_tensor_2, event_boundaries_2)]):
+
+                        event_cam_perspective_1 = train_cams.dataset.get_event_camera(idx, viewpoint_cam.time)
+                        event_cam_perspective_2 = train_cams.dataset.get_event_camera(idx, next_timestamp_for_viewpoint_cam)
+
+                        event_time_start = train_cams.dataset.timestamp_to_event_idx(viewpoint_cam.time, ev_bound)
+                        event_time_end = train_cams.dataset.timestamp_to_event_idx(next_timestamp_for_viewpoint_cam, ev_bound)
+
+                        render_1 = render(
+                            event_cam_perspective_1,
+                            gaussians,
+                            pipe,
+                            background,
+                            stage=stage,
+                            cam_type=scene.dataset_type,
+                        )["render"]
+                        render_2 = render(
+                            event_cam_perspective_2,
+                            gaussians,
+                            pipe,
+                            background,
+                            stage=stage,
+                            cam_type=scene.dataset_type,
+                        )["render"]
+                        
+                        total_event_loss += event_loss_call(
+                            render_1,
+                            render_2,
+                            ev_tensor,
+                            [event_time_start, event_time_end]
+                        ).cpu()
                     
-                    event_loss = event_loss_call(
-                        render_1,
-                        render_2,
-                        event_tensor,
-                        [event_time_start, event_time_end],
-                        viewpoint_cam.image_height,
-                        viewpoint_cam.image_width,
-                        iteration,
-                        None,
-                    ) * 0.001
+                    event_loss = total_event_loss * 0.05
 
                     # Can be toggled if there are issues with memory
                     # torch.cuda.empty_cache()
                     # gc.collect()
 
-                
-            
 
         radii = torch.cat(radii_list, 0).max(dim=0).values
         visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
