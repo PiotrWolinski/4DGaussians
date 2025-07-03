@@ -130,7 +130,7 @@ class OptimizationParams(ParamGroup):
         self.scaling_lr = 0.005
         self.rotation_lr = 0.001
         self.percent_dense = 0.01
-        self.lambda_dssim = 0
+        self.lambda_dssim = 0.05
         self.lambda_lpips = 0
         self.weight_constraint_init= 1
         self.weight_constraint_after = 0.2

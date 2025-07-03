@@ -3,11 +3,11 @@ ModelHiddenParams = dict(
      'grid_dimensions': 2,
      'input_coordinate_dim': 4,
      'output_coordinate_dim': 16,
-     'resolution': [64, 64, 64, 10]
+     'resolution': [64, 64, 64, 8]
     },
     multires = [1],
     defor_depth = 1,
-    net_width = 128,
+    net_width = 64,
     plane_tv_weight = 0.0002,
     time_smoothness_weight = 0.015,
     l1_time_planes =  0.0005,
