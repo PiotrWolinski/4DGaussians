@@ -30,12 +30,12 @@ def event_loss_call(image_start, image_end, event_data, timestamps):
     accumulated_events = event_clone[start:end, :, :].sum(dim=0)
 
     # Calculate thresholds
-    start_value = lin_log(torch.sum(image_start, dim=0)) * 255
-    end_value = lin_log(torch.sum(image_end, dim=0)) * 255        
+    start_value = lin_log(torch.sum(image_start, dim=0))
+    end_value = lin_log(torch.sum(image_end, dim=0))     
 
     # Get differences between two rendered images at consecutive timestamps
-    thres_pos = (end_value - start_value) / 0.3
-    thres_neg = (end_value - start_value) / 0.2
+    thres_pos = (end_value - start_value) / 0.95 # Assume higher contrast sensitivity due to good noise calibration
+    thres_neg = (end_value - start_value) / 0.95 
     #print(f"[Iteration {iteration}] thres_pos: {thres_pos}, thres_neg: {thres_neg}")
         
     pos = accumulated_events >= 0

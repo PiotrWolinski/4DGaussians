@@ -290,15 +290,22 @@ def scene_reconstruction(
                 if next_id is not None:
                     next_timestamp_for_viewpoint_cam = train_cams.dataset.possible_times[next_id-1]
 
-                    total_event_loss = torch.tensor(0, dtype=torch.float64)
+                    # Create a distribution of 100 timestamps between the current one and the next one and get only next 50 in the middle
+                    # to make sure that the time is "novel"
+                    time_between_current_and_next = torch.linspace(viewpoint_cam.time, next_timestamp_for_viewpoint_cam, steps=100)[25:75]
+
+                    # Get novel timestamp in between the external triggers
+                    next_random_timestamp = time_between_current_and_next[torch.randint(low=0, high=50, size=[1])]
+
+                    total_event_loss = torch.tensor(1, dtype=torch.float64)
 
                     for idx, (ev_tensor, ev_bound) in enumerate([(event_tensor_1, event_boundaries_1), (event_tensor_2, event_boundaries_2)]):
 
                         event_cam_perspective_1 = train_cams.dataset.get_event_camera(idx, viewpoint_cam.time)
-                        event_cam_perspective_2 = train_cams.dataset.get_event_camera(idx, next_timestamp_for_viewpoint_cam)
+                        event_cam_perspective_2 = train_cams.dataset.get_event_camera(idx, next_random_timestamp)
 
                         event_time_start = train_cams.dataset.timestamp_to_event_idx(viewpoint_cam.time, ev_bound)
-                        event_time_end = train_cams.dataset.timestamp_to_event_idx(next_timestamp_for_viewpoint_cam, ev_bound)
+                        event_time_end = train_cams.dataset.timestamp_to_event_idx(next_random_timestamp, ev_bound)
 
                         render_1 = render(
                             event_cam_perspective_1,
@@ -324,7 +331,7 @@ def scene_reconstruction(
                             [event_time_start, event_time_end]
                         ).cpu()
                     
-                    event_loss = total_event_loss * 0.05
+                    event_loss = total_event_loss * 0.02
 
                     # Can be toggled if there are issues with memory
                     # torch.cuda.empty_cache()
