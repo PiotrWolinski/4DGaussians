@@ -58,7 +58,7 @@ class ModelParams(ParamGroup):
         self.add_points=False
         self.extension=".png"
         self.llffhold=12
-        self.use_event = True
+        self.use_event = False
         self.lambda_event = 0.02
         super().__init__(parser, "Loading Parameters", sentinel)
 
