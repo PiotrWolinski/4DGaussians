@@ -104,10 +104,10 @@ class StaticMultiCamDataset(Dataset):
 
             prev_cam_id = cam_id
 
-            image_range = range(frames_count)
+        image_range = range(frames_count)
 
-            if self.split == "test":
-                image_range = [image_range[0], image_range[int(frames_count / 3)], image_range[int(frames_count * 2 / 3)]]
+        if self.split == "test":
+            image_range = [image_range[0], image_range[int(frames_count / 3)], image_range[int(frames_count * 2 / 3)]]
 
         for cam_id in camera_extrinsics:
 
