@@ -31,16 +31,16 @@ SOURCE_DATA_DIR = 'data/final_dataset/falling_bag'
 
 # A list of tuples: (path_to_h5_file, corresponding_cam_id_string)
 EVENT_SOURCES = [
-    ('/home/debmalya/Documents/4DGaussians_events/4DGaussians/data/h5_data/1642_paper_bag_data.h5', 'cam16'),
-    #('/home/debmalya/Documents/4DGaussians_events/4DGaussians/data/h5_data/1642_paper_bag_data.h5', 'cam16'),
+    ('/home/pwolinski/projects/4DGaussians/data/multipleview/falling_bag_undist_events/1634_paper_bag_data.h5', "/home/pwolinski/projects/4DGaussians/data/multipleview/falling_bag_undist_events/1634_time_paper_bag.txt", 'cam15'),
+    ('/home/pwolinski/projects/4DGaussians/data/multipleview/falling_bag_undist_events/1642_paper_bag_data.h5', "/home/pwolinski/projects/4DGaussians/data/multipleview/falling_bag_undist_events/1642_time_paper_bag.txt", 'cam16'),
 ]
-OUTPUT_DIR = '/home/debmalya/Documents/4DGaussians_events/4DGaussians/data/temp_pt'
+OUTPUT_DIR = '/home/pwolinski/projects/4DGaussians/data/multipleview/falling_bag_undist_events/tmp_test'
+
+TIMESTAMP_PATH = '/home/pwolinski/projects/4DGaussians/data/multipleview/falling_bag_undist_events/'
 
 H, W = 480, 640 # Image resolution
-TIMESTAMP_PATH = '/home/debmalya/Documents/4DGaussians_events/4DGaussians/data/h5_data/1642_time_paper_bag.txt'
 
-TIME_RESOLUTION = 2_000 # Set event aggregation window to 2 ms
-H, W = 480, 640 # Image resolution
+TIME_RESOLUTION = 1_000 # Set event aggregation window to 2 ms
 
 
 def get_timestamps_from_txt(txt_path):
@@ -50,15 +50,19 @@ def get_timestamps_from_txt(txt_path):
     return timestamps[0], timestamps[-1]  # Return start and end timestamps
     
     
-
-
-def create_event_tensor(h5_path, height, width):
+def create_event_tensor(h5_path, height, width, boundary_timestamps: tuple[int, int]):
 
     with h5py.File(h5_path, 'r') as f:
+        start_t, end_t = boundary_timestamps
         t = np.array(f['t'][:], dtype=int)  # Convert timestamps to NumPy array
-        x = np.array(f['x'][:], dtype=int)  # Convert x-coordinates to NumPy array
-        y = np.array(f['y'][:], dtype=int)  # Convert y-coordinates to NumPy array
-        p = np.array(f['p'][:], dtype=int)  # Convert polarities to NumPy array
+
+        time_mask = (t >= start_t) & (t < end_t)
+
+        t = t[time_mask]
+
+        x = np.array(f['x'][:], dtype=int)[time_mask]  # Convert x-coordinates to NumPy array
+        y = np.array(f['y'][:], dtype=int)[time_mask]  # Convert y-coordinates to NumPy array
+        p = np.array(f['p'][:], dtype=int)[time_mask]  # Convert polarities to NumPy array
         print(f"Length of x: {len(x)}, Sample: {x[:5]}")
         print(f"Length of y: {len(y)}, Sample: {y[:5]}")
         print(f"Length of p: {len(p)}, Sample: {p[:5]}")
@@ -131,13 +135,12 @@ def create_event_tensor(h5_path, height, width):
 
 
 if __name__ == "__main__":
-    timestamps = get_timestamps_from_txt(TIMESTAMP_PATH)
 
-
-    for h5_file_path, cam_id in EVENT_SOURCES:
+    for h5_file_path, timestamps_path, cam_id in EVENT_SOURCES:
+        timestamps = get_timestamps_from_txt(timestamps_path)
         
         print(f"\nProcessing events for {cam_id}...")
-        event_tensor = create_event_tensor(h5_file_path, H, W)
+        event_tensor = create_event_tensor(h5_file_path, H, W, timestamps)
 
 
         output_filename = f"events_{cam_id}.pt"
